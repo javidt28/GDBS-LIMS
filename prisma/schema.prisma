@@ -1,0 +1,543 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountKind {
+  INDIVIDUAL
+  ORGANIZATION
+}
+
+enum StaffRole {
+  RECEPTION
+  ANALYST
+  TECHNICAL_OFFICER
+  QUALITY_MANAGER
+  APPROVER
+  FINANCE
+  ADMINISTRATOR
+}
+
+enum LabCode {
+  AL
+  MBL
+  EA
+}
+
+enum ServiceClass {
+  TECHNICAL_SERVICES
+  CONFORMITY_ASSESSMENT
+}
+
+enum ServiceType {
+  CALIBRATION
+  VERIFICATION
+  TESTING
+  OTHER
+}
+
+enum RequestStatus {
+  DRAFT
+  SUBMITTED
+  RETURNED
+  REJECTED
+  ACKNOWLEDGED
+  COMPLETED
+  CANCELLED
+}
+
+enum JobStatus {
+  CREATED
+  IN_ANALYSIS
+  RESULTS_ENTERED
+  AWAITING_VERIFICATION
+  VERIFIED
+  REPORT_ISSUED
+  ON_HOLD
+  CANCELLED
+}
+
+enum AnalysisBasis {
+  STANDARD_COMPLIANCE
+  QUALITY_CONTROL
+  CLIENT_SPECIFIED
+}
+
+enum SampleOrigin {
+  CLIENT_REQUEST
+  INSPECTION
+  SURVEILLANCE
+}
+
+enum ReportKind {
+  CERTIFICATE_OF_ANALYSIS
+  TEST_REPORT
+}
+
+enum ReportStatus {
+  ISSUED
+  SUPERSEDED
+}
+
+enum QuotationStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum PaymentStatus {
+  UNPRICED
+  AWAITING
+  REFERENCE_SUBMITTED
+  CONFIRMED
+  WAIVED
+}
+
+enum PaymentMethod {
+  CASH
+  CHEQUE
+  DIRECT_DEPOSIT
+  WIRE_TRANSFER
+  TO_BE_INVOICED
+}
+
+enum SessionRealm {
+  CLIENT
+  STAFF
+}
+
+enum TokenPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+enum ActorType {
+  CLIENT
+  STAFF
+  SYSTEM
+}
+
+model ClientAccount {
+  id                    String      @id @default(cuid())
+  kind                  AccountKind @default(INDIVIDUAL)
+  name                  String      @default("")
+  address               String?
+  contactPerson         String?
+  contactNo             String?
+  email                 String?
+  profileCompletedAt    DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  users                 ClientUser[]
+  requests              ServiceRequest[]
+  samples               Sample[]
+}
+
+model ClientUser {
+  id              String        @id @default(cuid())
+  accountId       String
+  account         ClientAccount @relation(fields: [accountId], references: [id])
+  email           String        @unique
+  passwordHash    String
+  fullName        String
+  emailVerifiedAt DateTime?
+  disabledAt      DateTime?
+  createdAt       DateTime      @default(now())
+  sessions        Session[]
+  notifications   Notification[]
+  submittedRequests ServiceRequest[] @relation("RequestSubmitter")
+  quotationDecisions Quotation[] @relation("QuotationDecider")
+}
+
+model StaffUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  fullName     String
+  role         StaffRole
+  lab          LabCode?
+  disabledAt   DateTime?
+  createdAt    DateTime  @default(now())
+  sessions     Session[]
+}
+
+model Session {
+  id           String       @id @default(cuid())
+  tokenHash    String       @unique
+  realm        SessionRealm
+  clientUserId String?
+  clientUser   ClientUser?  @relation(fields: [clientUserId], references: [id])
+  staffUserId  String?
+  staffUser    StaffUser?   @relation(fields: [staffUserId], references: [id])
+  expiresAt    DateTime
+  createdAt    DateTime     @default(now())
+
+  @@index([clientUserId])
+  @@index([staffUserId])
+}
+
+model EmailToken {
+  id        String       @id @default(cuid())
+  purpose   TokenPurpose
+  email     String
+  tokenHash String       @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  @@index([email, purpose])
+}
+
+model ServiceRequest {
+  id               String        @id @default(cuid())
+  reference        String        @unique
+  status           RequestStatus @default(DRAFT)
+  accountId        String
+  account          ClientAccount @relation(fields: [accountId], references: [id])
+  submittedById    String?
+  submittedBy      ClientUser?   @relation("RequestSubmitter", fields: [submittedById], references: [id])
+  clientName       String        @default("")
+  clientAddress    String?
+  contactPerson    String?
+  contactNo        String?
+  contactEmail     String?
+  serviceType      ServiceType?
+  serviceTypeOther String?
+  description      String?
+  decisionRuleAck  Boolean       @default(false)
+  signatureName    String?
+  signedAt         DateTime?
+  assignedLab      LabCode?
+  responseAt       DateTime?
+  officialComments String?
+  rejectionReason  String?
+  returnReason     String?
+  submittedAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  samples          Sample[]
+  quotations       Quotation[]
+  payments         Payment[]
+  documents        Document[]
+
+  @@index([accountId, status])
+  @@index([status])
+}
+
+model Sample {
+  id                 String         @id @default(cuid())
+  origin             SampleOrigin   @default(CLIENT_REQUEST)
+  requestId          String?
+  request            ServiceRequest? @relation(fields: [requestId], references: [id])
+  accountId          String?
+  account            ClientAccount? @relation(fields: [accountId], references: [id])
+  description        String
+  brandName          String?
+  sizeQuantity       String?
+  manufacturer       String?
+  lotNo              String?
+  bestBefore         DateTime?      @db.Date
+  collectionPoint    String?
+  receiptNo          String?
+  comments           String?
+  collectorSignature String?
+  history            String?
+  storageLocation    String?
+  storedOn           DateTime?      @db.Date
+  analysisBasis      AnalysisBasis?
+  analysisBasisOther String?
+  sampleSize         String?
+  dateSampled        DateTime?      @db.Date
+  dateCollected      DateTime?      @db.Date
+  receivedAt         DateTime?
+  receivedById       String?
+  conditionNotes     String?
+  createdAt          DateTime       @default(now())
+  jobs               Job[]
+
+  @@index([requestId])
+  @@index([accountId, origin])
+}
+
+model Job {
+  id              String       @id @default(cuid())
+  jobNo           String       @unique
+  daySequence     Int
+  jobDate         DateTime     @db.Date
+  lab             LabCode
+  serviceClass    ServiceClass @default(TECHNICAL_SERVICES)
+  status          JobStatus    @default(CREATED)
+  sampleId        String
+  sample          Sample       @relation(fields: [sampleId], references: [id])
+  assigneeId      String?
+  dateStarted     DateTime?
+  dateCompleted   DateTime?
+  procedures      String?
+  placeOfAnalysis String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  analyses        JobAnalysis[]
+  envConditions   EnvCondition[]
+  verification    Verification?
+  reports         Report[]
+
+  @@unique([jobDate, lab, daySequence])
+  @@index([status, lab])
+  @@index([assigneeId])
+  @@index([serviceClass])
+}
+
+model JobAnalysis {
+  id         String   @id @default(cuid())
+  jobId      String
+  job        Job      @relation(fields: [jobId], references: [id])
+  name       String
+  completed  Boolean  @default(false)
+  reported   Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  readings   RawReading[]
+  result     Result?
+  revisions  ResultRevision[]
+
+  @@unique([jobId, name])
+  @@index([jobId])
+}
+
+model RawReading {
+  id              String    @id @default(cuid())
+  jobAnalysisId   String
+  jobAnalysis     JobAnalysis @relation(fields: [jobAnalysisId], references: [id])
+  revision        Int       @default(1)
+  testNo          Int
+  reading         String
+  roomEquipTempC  Decimal?  @db.Decimal(8, 2)
+  weightG         Decimal?  @db.Decimal(12, 4)
+  equipmentTag    String?
+  performedById   String
+  recordedAt      DateTime  @default(now())
+  supersededAt    DateTime?
+
+  @@index([jobAnalysisId, revision])
+}
+
+model Result {
+  id              String      @id @default(cuid())
+  jobAnalysisId   String      @unique
+  jobAnalysis     JobAnalysis @relation(fields: [jobAnalysisId], references: [id])
+  revision        Int         @default(1)
+  actualValue     String
+  units           String?
+  requirementText String?
+  uncertainty     String?
+  comments        String?
+  enteredById     String
+  enteredAt       DateTime    @default(now())
+  lockedAt        DateTime?
+}
+
+model ResultRevision {
+  id              String      @id @default(cuid())
+  jobAnalysisId   String
+  jobAnalysis     JobAnalysis @relation(fields: [jobAnalysisId], references: [id])
+  revision        Int
+  actualValue     String
+  units           String?
+  requirementText String?
+  uncertainty     String?
+  comments        String?
+  reason          String
+  correctedById   String
+  createdAt       DateTime    @default(now())
+
+  @@index([jobAnalysisId])
+}
+
+model EnvCondition {
+  id             String    @id @default(cuid())
+  jobId          String
+  job            Job       @relation(fields: [jobId], references: [id])
+  revision       Int       @default(1)
+  tempStartC     Decimal?  @db.Decimal(6, 2)
+  tempEndC       Decimal?  @db.Decimal(6, 2)
+  humidityStart  Decimal?  @db.Decimal(6, 2)
+  humidityEnd    Decimal?  @db.Decimal(6, 2)
+  recordedById   String
+  recordedAt     DateTime  @default(now())
+  supersededAt   DateTime?
+
+  @@index([jobId, revision])
+}
+
+model Verification {
+  id            String    @id @default(cuid())
+  jobId         String    @unique
+  job           Job       @relation(fields: [jobId], references: [id])
+  submittedById String
+  submittedAt   DateTime  @default(now())
+  verifiedById  String?
+  verifiedAt    DateTime?
+  notes         String?
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  jobId          String
+  job            Job          @relation(fields: [jobId], references: [id])
+  kind           ReportKind
+  status         ReportStatus
+  certificateNo  String       @unique
+  lab            LabCode
+  certYear       Int
+  yearSequence   Int
+  sampleIndex    Int
+  revision       Int          @default(1)
+  revisionOfId   String?
+  revisionOf     Report?      @relation("ReportRevision", fields: [revisionOfId], references: [id])
+  revisions      Report[]     @relation("ReportRevision")
+  storageKey     String
+  sha256         String
+  content        Json
+  issuedById     String
+  issuedAt       DateTime     @default(now())
+  supersededAt   DateTime?
+
+  @@unique([certYear, lab, yearSequence])
+  @@index([jobId, status])
+}
+
+model FeeSchedule {
+  id            String    @id @default(cuid())
+  code          String
+  name          String
+  unit          String
+  amount        Decimal   @db.Decimal(12, 2)
+  currency      String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  approvedById  String
+  notes         String?
+  createdAt     DateTime  @default(now())
+  lines         QuotationLine[]
+
+  @@unique([code, effectiveFrom])
+}
+
+model Quotation {
+  id              String          @id @default(cuid())
+  requestId       String
+  request         ServiceRequest  @relation(fields: [requestId], references: [id])
+  version         Int
+  status          QuotationStatus @default(DRAFT)
+  currency        String?
+  issuedAt        DateTime?
+  issuedById      String?
+  acceptedAt      DateTime?
+  acceptedById    String?
+  acceptedBy      ClientUser?     @relation("QuotationDecider", fields: [acceptedById], references: [id])
+  acceptanceTerms String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime        @default(now())
+  lines           QuotationLine[]
+
+  @@unique([requestId, version])
+  @@index([status])
+}
+
+model QuotationLine {
+  id            String      @id @default(cuid())
+  quotationId   String
+  quotation     Quotation   @relation(fields: [quotationId], references: [id])
+  feeScheduleId String
+  feeSchedule   FeeSchedule @relation(fields: [feeScheduleId], references: [id])
+  description   String
+  quantity      Int
+  unitAmount    Decimal     @db.Decimal(12, 2)
+  amount        Decimal     @db.Decimal(12, 2)
+  currency      String
+
+  @@index([quotationId])
+}
+
+model Payment {
+  id                String         @id @default(cuid())
+  requestId         String
+  request           ServiceRequest @relation(fields: [requestId], references: [id])
+  status            PaymentStatus  @default(UNPRICED)
+  method            PaymentMethod?
+  amount            Decimal?       @db.Decimal(12, 2)
+  currency          String?
+  clientReference   String?
+  referenceSubmittedAt DateTime?
+  confirmedAt       DateTime?
+  confirmedById     String?
+  confirmationNote  String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([requestId, status])
+}
+
+model Document {
+  id                 String          @id @default(cuid())
+  requestId          String
+  request            ServiceRequest  @relation(fields: [requestId], references: [id])
+  storageKey         String          @unique
+  filename           String
+  mimeType           String
+  sizeBytes          Int
+  uploadedByClientId String?
+  createdAt          DateTime        @default(now())
+
+  @@index([requestId])
+}
+
+model Notification {
+  id           String    @id @default(cuid())
+  clientUserId String?
+  clientUser   ClientUser? @relation(fields: [clientUserId], references: [id])
+  staffUserId  String?
+  kind         String
+  title        String
+  body         String
+  href         String?
+  dedupeKey    String?   @unique
+  readAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([clientUserId, readAt])
+  @@index([staffUserId, readAt])
+}
+
+model AuditLog {
+  id        String    @id @default(cuid())
+  entity    String
+  entityId  String
+  action    String
+  actorId   String?
+  actorType ActorType
+  before    Json?
+  after     Json?
+  reason    String?
+  createdAt DateTime  @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model NumberSequence {
+  key   String @id
+  value Int    @default(0)
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
