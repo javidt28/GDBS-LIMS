@@ -296,20 +296,6 @@ export async function FeesPage({ searchParams }: { searchParams: Promise<{ error
   );
 }
 
-export async function IssuedPage() {
-  const staff = await requireStaff();
-  if (!can(staff.role, "reports.read")) return <Empty>You do not have permission to view issued documents.</Empty>;
-  const reports = await prisma.report.findMany({ orderBy: { issuedAt: "desc" }, take: 100 });
-  return (
-    <>
-      <PageHeading title="Issued documents" />
-      {reports.length === 0 ? <Empty>No reports have been issued.</Empty> : (
-        <ul>{reports.map((report) => <li key={report.id}><a href={`/files/reports/${report.id}`}>{report.certificateNo}/{String(report.sampleIndex).padStart(3, "0")}</a> {report.status} revision {report.revision}</li>)}</ul>
-      )}
-    </>
-  );
-}
-
 export async function StaffNotes() {
   const staff = await requireStaff();
   const notes = await prisma.notification.findMany({ where: { staffUserId: staff.id }, orderBy: { createdAt: "desc" } });

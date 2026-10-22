@@ -41,7 +41,9 @@ export default async function StaffRequestPage({
           <Card title="Client and contact">
             <Facts
               items={[
-                ["Client", request.clientName],
+                ["Client", request.clientName && can(staff.role, "clients.read")
+                  ? <Link href={`/internal/clients/${request.accountId}`}>{request.clientName}</Link>
+                  : request.clientName],
                 ["Contact person", request.contactPerson],
                 ["Phone", request.contactNo],
                 ["Email", request.contactEmail && <a href={`mailto:${request.contactEmail}`}>{request.contactEmail}</a>],

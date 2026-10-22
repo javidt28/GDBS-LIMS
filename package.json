@@ -11,7 +11,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "postinstall": "prisma generate",
     "demo:seed": "tsx scripts/demo-data.ts seed",
-    "demo:clean": "tsx scripts/demo-data.ts clean"
+    "demo:clean": "tsx scripts/demo-data.ts clean",
+    "demo:logins": "tsx scripts/demo-logins.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
