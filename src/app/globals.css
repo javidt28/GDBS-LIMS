@@ -646,6 +646,7 @@ textarea { min-height: 5.5rem; resize: vertical; }
 .app-shell .form-section .table-wrap { box-shadow: none; }
 
 .app-shell .search-row { align-items: flex-end; margin-bottom: 1rem; }
+.app-shell .search-row .search-grow { flex: 1; min-width: 12rem; }
 .app-shell .search-row .btn { background: var(--navy); border-color: var(--navy); color: white; }
 .app-shell .search-row .btn:hover { background: var(--navy-deep); }
 

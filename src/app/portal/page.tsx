@@ -12,7 +12,12 @@ export default async function PortalHome({ searchParams }: { searchParams: Promi
   const [active, drafts, returned, received, reports, notifications] = await Promise.all([
     prisma.serviceRequest.count({ where: { accountId, status: { in: ["SUBMITTED", "ACKNOWLEDGED"] } } }),
     prisma.serviceRequest.count({ where: { accountId, status: "DRAFT" } }),
-    prisma.serviceRequest.count({ where: { accountId, status: "RETURNED" } }),
+    prisma.serviceRequest.count({
+      where: {
+        accountId,
+        OR: [{ status: "RETURNED" }, { quotations: { some: { status: "ISSUED" } } }],
+      },
+    }),
     prisma.sample.count({ where: { accountId, origin: "CLIENT_REQUEST", receivedAt: { not: null }, jobs: { some: { serviceClass: "TECHNICAL_SERVICES", status: { not: "REPORT_ISSUED" } } } } }),
     prisma.report.count({ where: { status: "ISSUED", job: { serviceClass: "TECHNICAL_SERVICES", sample: { accountId, origin: "CLIENT_REQUEST" } } } }),
     prisma.notification.count({ where: { clientUserId: user.id, readAt: null } }),
@@ -25,7 +30,7 @@ export default async function PortalHome({ searchParams }: { searchParams: Promi
   const cards = [
     { label: "Active requests", value: active, href: "/portal/requests", tone: "blue" },
     { label: "Drafts", value: drafts, href: "/portal/requests", tone: "violet" },
-    { label: "Awaiting your action", value: returned, href: "/portal/requests", tone: "amber" },
+    { label: "Awaiting your action", value: returned, href: "/portal/quotations", tone: "amber" },
     { label: "Samples in testing", value: received, href: "/portal/samples", tone: "teal" },
     { label: "Issued reports", value: reports, href: "/portal/reports", tone: "green" },
     { label: "Unread notifications", value: notifications, href: "/portal/notifications", tone: "blue" },

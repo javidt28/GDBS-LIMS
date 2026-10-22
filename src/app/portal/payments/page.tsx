@@ -17,11 +17,11 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeading
         title="Payments"
-        meta="Card payment is not available. A submitted bank reference stays unconfirmed until GDBS records it."
+        meta="You can pay before accepting the invoice. Accounts confirms and signs off the payment."
       />
       <Banner error={query.error} />
       {payments.length === 0 ? (
-        <Empty>No payment records yet. GDBS opens one after your request is acknowledged.</Empty>
+        <Empty>No payment records yet. One opens when GDBS issues the invoice.</Empty>
       ) : (
         <div className="detail-main">
           {payments.map((payment) => {

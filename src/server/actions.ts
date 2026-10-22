@@ -479,29 +479,34 @@ export async function clientQuotationAction(formData: FormData) {
   "use server";
   const user = await requireClient();
   const quotationId = String(formData.get("quotationId"));
+  let requestId = "";
+  let decision = "";
   try {
-    await decideQuotation(
+    decision = String(formData.get("decision"));
+    const updated = await decideQuotation(
       user.id,
       user.accountId,
       quotationId,
-      String(formData.get("decision")) as "ACCEPTED" | "REJECTED",
+      decision as "ACCEPTED" | "REJECTED",
       String(formData.get("reason") ?? ""),
     );
+    requestId = updated.requestId;
   } catch (error) {
     redirect(`/portal/quotations?error=${encodeURIComponent(fail(error))}`);
   }
-  redirect("/portal/quotations");
+  redirect(requestId ? `/portal/requests/${requestId}?tab=${decision === "ACCEPTED" ? "payment" : "invoice"}` : "/portal/quotations");
 }
 
 export async function paymentReferenceAction(formData: FormData) {
   "use server";
   const user = await requireClient();
+  const requestId = String(formData.get("requestId") ?? "");
   try {
     await recordPaymentReference(user.accountId, user.id, String(formData.get("paymentId")), String(formData.get("reference") ?? ""));
   } catch (error) {
-    redirect(`/portal/payments?error=${encodeURIComponent(fail(error))}`);
+    redirect(requestId ? `/portal/requests/${requestId}?tab=payment&error=${encodeURIComponent(fail(error))}` : `/portal/payments?error=${encodeURIComponent(fail(error))}`);
   }
-  redirect("/portal/payments");
+  redirect(requestId ? `/portal/requests/${requestId}?tab=payment` : "/portal/payments");
 }
 
 export async function paymentStaffAction(formData: FormData) {

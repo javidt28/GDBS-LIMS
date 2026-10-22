@@ -4,7 +4,7 @@ import type { StaffActor } from "./accounts";
 import { DomainError } from "./errors";
 import { notify } from "./notify";
 import { assertCan } from "./permissions";
-import { prisma } from "./prisma";
+import { prisma, type Tx } from "./prisma";
 
 export async function createQuotation(actor: StaffActor, requestId: string) {
   assertCan(actor.role, "quotations.manage");
@@ -64,44 +64,15 @@ export async function issueQuotation(actor: StaffActor, quotationId: string) {
     include: { lines: true, request: true },
   });
   if (!quotation) throw new DomainError("Quotation not found.", "NOT_FOUND");
-  if (quotation.lines.length === 0) throw new DomainError("Add at least one approved fee before issuing.");
+  if (quotation.lines.length === 0) throw new DomainError("Add at least one approved fee before issuing the invoice.");
   const currencies = new Set(quotation.lines.map((line) => line.currency));
-  if (currencies.size !== 1) throw new DomainError("A quotation cannot mix currencies.");
+  if (currencies.size !== 1) throw new DomainError("An invoice cannot mix currencies.");
   const terms = await prisma.systemSetting.findUnique({ where: { key: "quotation.acceptanceTerms" } });
   const acceptanceTerms = typeof terms?.value === "string" ? terms.value : "";
   if (!acceptanceTerms.trim()) {
-    throw new DomainError("Acceptance terms have not been approved, so this quotation cannot be issued.");
+    throw new DomainError("Acceptance terms have not been approved, so this invoice cannot be issued.");
   }
-  return prisma.$transaction(async (tx) => {
-    const issued = await tx.quotation.update({
-      where: { id: quotation.id },
-      data: {
-        status: "ISSUED",
-        issuedAt: new Date(),
-        issuedById: actor.id,
-        currency: quotation.lines[0].currency,
-        acceptanceTerms,
-      },
-    });
-    if (quotation.request.submittedById) {
-      await notify(tx, {
-        clientUserId: quotation.request.submittedById,
-        kind: "QUOTATION_ISSUED",
-        title: "Quotation issued",
-        body: `Version ${quotation.version} for ${quotation.request.reference} is ready for review.`,
-        href: `/portal/requests/${quotation.requestId}`,
-        dedupeKey: `quotation.issued:${quotation.id}`,
-      });
-    }
-    await audit(tx, {
-      entity: "Quotation",
-      entityId: quotation.id,
-      action: "quotation.issue",
-      actorId: actor.id,
-      actorType: "STAFF",
-    });
-    return issued;
-  });
+  return prisma.$transaction(async (tx) => markInvoiceIssued(tx, actor, quotation, acceptanceTerms));
 }
 
 export async function decideQuotation(
@@ -115,7 +86,7 @@ export async function decideQuotation(
     where: { id: quotationId, request: { accountId } },
     include: { request: true },
   });
-  if (!quotation || quotation.status !== "ISSUED") throw new DomainError("Quotation not found.", "NOT_FOUND");
+  if (!quotation || quotation.status !== "ISSUED") throw new DomainError("Invoice not found.", "NOT_FOUND");
   if (decision === "REJECTED" && !reason?.trim()) throw new DomainError("Record the reason for rejection.", "VALIDATION");
   if (decision === "ACCEPTED" && !quotation.acceptanceTerms?.trim()) {
     throw new DomainError("Acceptance terms have not been approved.", "VALIDATION");
@@ -137,13 +108,14 @@ export async function decideQuotation(
       after: { version: quotation.version, terms: quotation.acceptanceTerms },
       reason,
     });
+    if (decision === "ACCEPTED") await ensurePaymentRecord(tx, quotation.requestId);
     const staff = await tx.staffUser.findMany({ where: { role: { in: ["FINANCE", "ADMINISTRATOR"] }, disabledAt: null } });
     for (const person of staff) {
       await notify(tx, {
         staffUserId: person.id,
         kind: decision === "ACCEPTED" ? "QUOTATION_ACCEPTED" : "QUOTATION_REJECTED",
-        title: decision === "ACCEPTED" ? "Quotation accepted" : "Quotation rejected",
-        body: `${quotation.request.reference} version ${quotation.version} was ${decision === "ACCEPTED" ? "accepted" : "rejected"}.`,
+        title: decision === "ACCEPTED" ? "Invoice accepted" : "Invoice rejected",
+        body: `${quotation.request.reference} invoice version ${quotation.version} was ${decision === "ACCEPTED" ? "accepted" : "rejected"}.`,
         href: `/internal/quotations/${quotation.id}`,
         dedupeKey: `quotation.${decision}:${quotation.id}:${person.id}`,
       });
@@ -211,6 +183,7 @@ export async function recordPaymentReference(accountId: string, userId: string, 
 
 export async function confirmPayment(actor: StaffActor, paymentId: string, note?: string) {
   assertCan(actor.role, "payments.confirm");
+  if (!note?.trim()) throw new DomainError("Record the accounts sign-off note.", "VALIDATION");
   const payment = await prisma.payment.findUnique({ where: { id: paymentId }, include: { request: true } });
   if (!payment) throw new DomainError("Payment not found.", "NOT_FOUND");
   if (payment.status !== "REFERENCE_SUBMITTED" && payment.status !== "AWAITING") {
@@ -219,7 +192,7 @@ export async function confirmPayment(actor: StaffActor, paymentId: string, note?
   return prisma.$transaction(async (tx) => {
     const updated = await tx.payment.update({
       where: { id: payment.id },
-      data: { status: "CONFIRMED", confirmedAt: new Date(), confirmedById: actor.id, confirmationNote: note?.trim() || null },
+      data: { status: "CONFIRMED", confirmedAt: new Date(), confirmedById: actor.id, confirmationNote: note.trim() },
     });
     await audit(tx, {
       entity: "Payment",
@@ -244,28 +217,73 @@ export async function confirmPayment(actor: StaffActor, paymentId: string, note?
 
 export async function openPayment(actor: StaffActor, requestId: string, method: PaymentMethod) {
   assertCan(actor.role, "payments.confirm");
-  const request = await prisma.serviceRequest.findUnique({
-    where: { id: requestId },
-    include: { quotations: { where: { status: "ACCEPTED" }, orderBy: { version: "desc" }, take: 1, include: { lines: true } } },
-  });
+  const request = await prisma.serviceRequest.findUnique({ where: { id: requestId } });
   if (!request) throw new DomainError("Request not found.", "NOT_FOUND");
   if (request.status !== "ACKNOWLEDGED" && request.status !== "COMPLETED") {
     throw new DomainError("A payment can be opened only for an acknowledged request.");
   }
-  if (await prisma.payment.count({ where: { requestId } })) {
-    throw new DomainError("This request already has a payment record.");
+  return prisma.$transaction((tx) => ensurePaymentRecord(tx, requestId, method));
+}
+
+/** Creates the invoice after a request is acknowledged. Reception can trigger this; finance still edits drafts. */
+export async function generateInvoiceOnAcknowledge(tx: Tx, actor: StaffActor, requestId: string) {
+  const existing = await tx.quotation.findFirst({ where: { requestId }, orderBy: { version: "desc" } });
+  if (existing) {
+    if (existing.status === "ISSUED" || existing.status === "ACCEPTED") await ensurePaymentRecord(tx, requestId);
+    return existing;
   }
-  const accepted = request.quotations[0];
-  const amount = accepted ? accepted.lines.reduce((sum, line) => sum + Number(line.amount), 0) : null;
-  return prisma.payment.create({
-    data: {
-      requestId,
-      method,
-      status: amount == null ? "UNPRICED" : "AWAITING",
-      amount,
-      currency: accepted?.currency,
-    },
+  const request = await tx.serviceRequest.findUnique({
+    where: { id: requestId },
+    include: { samples: true },
   });
+  if (!request) throw new DomainError("Request not found.", "NOT_FOUND");
+  const quotation = await tx.quotation.create({ data: { requestId, version: 1, status: "DRAFT" } });
+  await audit(tx, {
+    entity: "Quotation",
+    entityId: quotation.id,
+    action: "quotation.create",
+    actorId: actor.id,
+    actorType: "STAFF",
+    after: { version: 1, source: "acknowledge" },
+  });
+  const fees = await activeFees(tx);
+  const matched = feesForRequest(fees, request);
+  const quantity = Math.max(request.samples.length, 1);
+  for (const fee of matched) {
+    await tx.quotationLine.create({
+      data: {
+        quotationId: quotation.id,
+        feeScheduleId: fee.id,
+        description: fee.name,
+        quantity,
+        unitAmount: fee.amount,
+        amount: Number(fee.amount) * quantity,
+        currency: fee.currency,
+      },
+    });
+  }
+  const withLines = await tx.quotation.findUniqueOrThrow({
+    where: { id: quotation.id },
+    include: { lines: true, request: true },
+  });
+  const terms = await tx.systemSetting.findUnique({ where: { key: "quotation.acceptanceTerms" } });
+  const acceptanceTerms = typeof terms?.value === "string" ? terms.value : "";
+  const currencies = new Set(withLines.lines.map((line) => line.currency));
+  if (withLines.lines.length === 0 || !acceptanceTerms.trim() || currencies.size !== 1) {
+    const finance = await tx.staffUser.findMany({ where: { role: { in: ["FINANCE", "ADMINISTRATOR"] }, disabledAt: null } });
+    for (const person of finance) {
+      await notify(tx, {
+        staffUserId: person.id,
+        kind: "INVOICE_DRAFT",
+        title: "Invoice needs pricing",
+        body: `${request.reference} was acknowledged. Add approved fees and issue the invoice.`,
+        href: `/internal/quotations/${quotation.id}`,
+        dedupeKey: `invoice.draft:${quotation.id}:${person.id}`,
+      });
+    }
+    return withLines;
+  }
+  return markInvoiceIssued(tx, actor, withLines, acceptanceTerms);
 }
 
 export async function setAcceptanceTerms(actor: StaffActor, terms: string) {
@@ -282,6 +300,93 @@ export async function setAcceptanceTerms(actor: StaffActor, terms: string) {
     action: "settings.acceptance_terms",
     actorId: actor.id,
     actorType: "STAFF",
+  });
+}
+
+type InvoiceRecord = Prisma.QuotationGetPayload<{ include: { lines: true; request: true } }>;
+
+async function markInvoiceIssued(tx: Tx, actor: StaffActor, quotation: InvoiceRecord, acceptanceTerms: string) {
+  const issued = await tx.quotation.update({
+    where: { id: quotation.id },
+    data: {
+      status: "ISSUED",
+      issuedAt: new Date(),
+      issuedById: actor.id,
+      currency: quotation.lines[0].currency,
+      acceptanceTerms,
+    },
+  });
+  await ensurePaymentRecord(tx, quotation.requestId);
+  if (quotation.request.submittedById) {
+    await notify(tx, {
+      clientUserId: quotation.request.submittedById,
+      kind: "QUOTATION_ISSUED",
+      title: "Invoice issued",
+      body: `Invoice version ${quotation.version} for ${quotation.request.reference} is ready. You can accept it or pay before accepting.`,
+      href: `/portal/requests/${quotation.requestId}?tab=invoice`,
+      dedupeKey: `quotation.issued:${quotation.id}`,
+    });
+  }
+  await audit(tx, {
+    entity: "Quotation",
+    entityId: quotation.id,
+    action: "quotation.issue",
+    actorId: actor.id,
+    actorType: "STAFF",
+  });
+  return issued;
+}
+
+async function invoiceAmount(tx: Tx, requestId: string) {
+  const quotation = await tx.quotation.findFirst({
+    where: { requestId, status: { in: ["ISSUED", "ACCEPTED"] } },
+    include: { lines: true },
+    orderBy: { version: "desc" },
+  });
+  if (!quotation || quotation.lines.length === 0) return { amount: null as number | null, currency: null as string | null };
+  return {
+    amount: quotation.lines.reduce((sum, line) => sum + Number(line.amount), 0),
+    currency: quotation.currency ?? quotation.lines[0].currency,
+  };
+}
+
+async function ensurePaymentRecord(tx: Tx, requestId: string, method: PaymentMethod = "DIRECT_DEPOSIT") {
+  const priced = await invoiceAmount(tx, requestId);
+  const existing = await tx.payment.findFirst({ where: { requestId }, orderBy: { createdAt: "desc" } });
+  if (existing) {
+    if ((existing.status === "AWAITING" || existing.status === "UNPRICED") && priced.amount != null) {
+      return tx.payment.update({
+        where: { id: existing.id },
+        data: { status: "AWAITING", amount: priced.amount, currency: priced.currency, method: existing.method ?? method },
+      });
+    }
+    return existing;
+  }
+  return tx.payment.create({
+    data: {
+      requestId,
+      method,
+      status: priced.amount == null ? "UNPRICED" : "AWAITING",
+      amount: priced.amount,
+      currency: priced.currency,
+    },
+  });
+}
+
+async function activeFees(tx: Tx) {
+  const now = new Date();
+  return tx.feeSchedule.findMany({
+    where: { effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
+    orderBy: { name: "asc" },
+  });
+}
+
+function feesForRequest<T extends { name: string }>(fees: T[], request: { description: string | null; serviceType: string | null }) {
+  const haystack = `${request.description ?? ""} ${request.serviceType ?? ""}`.toLowerCase();
+  return fees.filter((fee) => {
+    const label = fee.name.replace(/^demo\s*[–-]\s*/i, "").toLowerCase();
+    const token = label.replace(/\b(content|panel|analysis|test|testing|check|for|and)\b/g, " ").trim().split(/\s+/)[0];
+    return Boolean(token && token.length >= 3 && haystack.includes(token));
   });
 }
 

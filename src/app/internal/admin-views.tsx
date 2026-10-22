@@ -9,12 +9,12 @@ import { requireStaff } from "@/server/session";
 
 export async function QuotationsAdmin() {
   const staff = await requireStaff();
-  if (!can(staff.role, "quotations.read")) return <Empty>You do not have permission to view quotations.</Empty>;
+  if (!can(staff.role, "quotations.read")) return <Empty>You do not have permission to view invoices.</Empty>;
   const quotations = await prisma.quotation.findMany({ include: { request: true, lines: true }, orderBy: { createdAt: "desc" } });
   return (
     <>
-      <PageHeading title="Quotations" />
-      {quotations.length === 0 ? <Empty>No quotations. A line can be added only from an approved fee, and none are loaded.</Empty> : (
+      <PageHeading title="Invoices" meta="An invoice is generated when a request is acknowledged. Finance can still add approved fees to a draft." />
+      {quotations.length === 0 ? <Empty>No invoices yet. Acknowledging a request creates one.</Empty> : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Request</th><th>Version</th><th>Lines</th><th>Created</th><th>Status</th></tr></thead>
@@ -38,16 +38,16 @@ export async function QuotationsAdmin() {
 
 export async function QuotationDetail({ params }: { params: Promise<{ id: string }> }) {
   const staff = await requireStaff();
-  if (!can(staff.role, "quotations.read")) return <Empty>You do not have permission to view quotations.</Empty>;
+  if (!can(staff.role, "quotations.read")) return <Empty>You do not have permission to view invoices.</Empty>;
   const { id } = await params;
   const quotation = await prisma.quotation.findUnique({ where: { id }, include: { lines: true, request: true } });
   const fees = await prisma.feeSchedule.findMany({ orderBy: { name: "asc" } });
-  if (!quotation) return <Empty>Quotation not found.</Empty>;
+  if (!quotation) return <Empty>Invoice not found.</Empty>;
   return (
     <>
       <PageHeading
         title={`${quotation.request.reference}, version ${quotation.version}`}
-        crumbs={[{ href: "/internal/quotations", label: "Quotations" }]}
+        crumbs={[{ href: "/internal/quotations", label: "Invoices" }]}
         meta={<>Created {formatDate(quotation.createdAt)}{quotation.issuedAt && <> · Issued {formatDate(quotation.issuedAt)}</>}</>}
         action={<Status value={quotation.status} />}
       />
@@ -72,7 +72,7 @@ export async function QuotationDetail({ params }: { params: Promise<{ id: string
               </div>
             )}
             {quotation.status === "DRAFT" && (
-              fees.length === 0 ? <p className="help">No approved fee exists, so a priced line cannot be added.</p> : (
+              fees.length === 0 ? <p className="help">No approved fee exists, so a priced line cannot be added to this invoice.</p> : (
                 <form action={quotationAction} className="stack subform">
                   <h3>Add a line</h3>
                   <input type="hidden" name="intent" value="line" />
@@ -101,13 +101,13 @@ export async function QuotationDetail({ params }: { params: Promise<{ id: string
             />
           </Card>
           {quotation.status === "DRAFT" && (
-            <Card title="Issue to client" className="card-accent">
+            <Card title="Issue invoice" className="card-accent">
               <form action={quotationAction} className="stack">
-                <p className="card-note">The client can accept or reject the quotation once it is issued.</p>
+                <p className="card-note">The client can accept or reject the invoice once it is issued. They may also pay before accepting.</p>
                 <input type="hidden" name="intent" value="issue" />
                 <input type="hidden" name="quotationId" value={quotation.id} />
                 <input type="hidden" name="requestId" value={quotation.requestId} />
-                <button className="btn btn-primary" type="submit">Issue quotation</button>
+                <button className="btn btn-primary" type="submit">Issue invoice</button>
               </form>
             </Card>
           )}
@@ -154,7 +154,7 @@ export async function PaymentsAdmin({ searchParams }: { searchParams: Promise<{ 
     canConfirm
       ? prisma.serviceRequest.findMany({
           where: { status: { in: ["ACKNOWLEDGED", "COMPLETED"] }, payments: { none: {} } },
-          include: { quotations: { where: { status: "ACCEPTED" }, include: { lines: true }, orderBy: { version: "desc" }, take: 1 } },
+          include: { quotations: { where: { status: { in: ["ISSUED", "ACCEPTED"] } }, include: { lines: true }, orderBy: { version: "desc" }, take: 1 } },
           orderBy: { updatedAt: "desc" },
         })
       : [],
@@ -170,7 +170,7 @@ export async function PaymentsAdmin({ searchParams }: { searchParams: Promise<{ 
 
   return (
     <>
-      <PageHeading title="Payments" meta="Confirming a payment is a staff decision. A client reference alone does not confirm it." />
+      <PageHeading title="Payments" meta="Accounts confirms and signs off each payment. A client reference alone does not confirm it." />
       <Banner error={query.error} />
 
       <div className="stat-grid">
@@ -194,7 +194,7 @@ export async function PaymentsAdmin({ searchParams }: { searchParams: Promise<{ 
                   const amount = quotation ? quotation.lines.reduce((sum, line) => sum + Number(line.amount), 0) : null;
                   return (
                     <option key={request.id} value={request.id}>
-                      {request.reference} · {request.clientName || "Client"} · {amount == null ? "no accepted quotation" : money(amount, quotation.currency)}
+                      {request.reference} · {request.clientName || "Client"} · {amount == null ? "no issued invoice" : money(amount, quotation.currency)}
                     </option>
                   );
                 })}
@@ -207,7 +207,7 @@ export async function PaymentsAdmin({ searchParams }: { searchParams: Promise<{ 
             </label>
             <button className="btn btn-primary" type="submit">Open payment record</button>
           </form>
-          <p className="help">The amount comes from the accepted quotation. Without one, the record opens as unpriced.</p>
+          <p className="help">The amount comes from the issued invoice. Clients may pay before they accept it.</p>
         </Card>
       )}
 
@@ -247,12 +247,12 @@ export async function PaymentsAdmin({ searchParams }: { searchParams: Promise<{ 
                     <td className="cell-action">
                       {(payment.status === "AWAITING" || payment.status === "REFERENCE_SUBMITTED") && (
                         <details className="inline-confirm">
-                          <summary className="btn">Confirm</summary>
+                          <summary className="btn">Sign off</summary>
                           <form action={paymentStaffAction} className="stack">
                             <input type="hidden" name="intent" value="confirm" />
                             <input type="hidden" name="paymentId" value={payment.id} />
-                            <label>Reconciliation note<input name="note" placeholder="Optional" /></label>
-                            <button className="btn btn-primary" type="submit">Confirm payment</button>
+                            <label>Accounts sign-off note<input name="note" required placeholder="Funds received and reconciled" /></label>
+                            <button className="btn btn-primary" type="submit">Confirm and sign off</button>
                           </form>
                         </details>
                       )}
@@ -397,7 +397,7 @@ export async function SettingsPage({ searchParams }: { searchParams: Promise<{ e
     <>
       <PageHeading title="Settings" />
       <Banner error={query.error} ok={query.saved ? "Saved." : undefined} />
-      <p>Quotation acceptance terms are empty until GDBS supplies the wording. A quotation cannot be issued without them.</p>
+      <p>Invoice acceptance terms are empty until GDBS supplies the wording. An invoice cannot be issued without them.</p>
       <p>Current terms: {typeof terms?.value === "string" && terms.value ? terms.value : "Not set."}</p>
       {staff.role === "ADMINISTRATOR" && (
         <form action={termsAction} className="stack">

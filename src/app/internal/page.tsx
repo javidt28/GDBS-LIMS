@@ -3,8 +3,7 @@ import { Status } from "@/components/shell";
 import { prisma } from "@/server/prisma";
 import { can } from "@/server/permissions";
 import { requireStaff } from "@/server/session";
-
-const OPEN_JOBS = ["CREATED", "IN_ANALYSIS", "RESULTS_ENTERED", "AWAITING_VERIFICATION"] as const;
+import { OPEN_JOB_STATUSES } from "./jobs/work-orders-table";
 
 function greeting() {
   const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Grenada" }).format(new Date()));
@@ -17,7 +16,7 @@ export default async function InternalHome() {
   const readJobs = can(staff.role, "jobs.read");
   const readPayments = can(staff.role, "payments.read");
   const readReports = can(staff.role, "reports.read");
-  const jobScope = { status: { in: [...OPEN_JOBS] }, ...(staff.role === "ANALYST" ? { assigneeId: staff.id } : {}) };
+  const jobScope = { status: { in: [...OPEN_JOB_STATUSES] }, ...(staff.role === "ANALYST" ? { assigneeId: staff.id } : {}) };
 
   const [requests, jobs, awaiting, payments, reports, recentRequests, recentJobs] = await Promise.all([
     readRequests ? prisma.serviceRequest.count({ where: { status: "SUBMITTED" } }) : null,
@@ -33,8 +32,8 @@ export default async function InternalHome() {
 
   const cards = [
     requests != null && { label: "Requests to review", value: requests, href: "/internal/requests", tone: "blue" },
-    jobs != null && { label: staff.role === "ANALYST" ? "My open work" : "Open work orders", value: jobs, href: "/internal/work", tone: "teal" },
-    awaiting != null && { label: "Awaiting verification", value: awaiting, href: "/internal/jobs", tone: "amber" },
+    jobs != null && { label: staff.role === "ANALYST" ? "My open work" : "Open work orders", value: jobs, href: staff.role === "ANALYST" ? "/internal/work" : "/internal/jobs?status=open", tone: "teal" },
+    awaiting != null && { label: "Awaiting verification", value: awaiting, href: "/internal/jobs?status=AWAITING_VERIFICATION", tone: "amber" },
     payments != null && { label: "Payments to confirm", value: payments, href: "/internal/payments", tone: "violet" },
     reports != null && { label: "Issued documents", value: reports, href: "/internal/reports", tone: "green" },
   ].filter(Boolean) as { label: string; value: number; href: string; tone: string }[];

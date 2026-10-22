@@ -310,6 +310,8 @@ export async function saveResult(
     const complete = job.analyses.every((item) => item.result);
     if (complete && (job.status === "IN_ANALYSIS" || job.status === "CREATED")) {
       await tx.job.update({ where: { id: job.id }, data: { status: "RESULTS_ENTERED", dateStarted: job.dateStarted ?? new Date() } });
+    } else if (job.status === "CREATED") {
+      await tx.job.update({ where: { id: job.id }, data: { status: "IN_ANALYSIS", dateStarted: job.dateStarted ?? new Date() } });
     }
     await audit(tx, {
       entity: "Result",
@@ -370,14 +372,19 @@ export async function submitVerification(
     include: { analyses: { include: { result: true } }, verification: true },
   });
   if (!job) throw new DomainError("Work order not found.", "NOT_FOUND");
-  if (job.status !== "RESULTS_ENTERED" && job.status !== "IN_ANALYSIS") {
+  if (!["CREATED", "IN_ANALYSIS", "RESULTS_ENTERED"].includes(job.status)) {
     throw new DomainError("Results must be entered before verification.");
-  }
-  if (job.analyses.some((analysis) => !analysis.result)) {
-    throw new DomainError("Every requested analysis needs a result before verification.");
   }
   if (input.rows.length !== job.analyses.length) {
     throw new DomainError("Complete the verification checklist for every analysis.", "VALIDATION");
+  }
+  const marked = input.rows.filter((row) => row.completed || row.reported);
+  if (marked.length === 0) {
+    throw new DomainError("Mark at least one analysis as completed or reported.", "VALIDATION");
+  }
+  const missing = marked.filter((row) => !job.analyses.find((analysis) => analysis.id === row.analysisId)?.result);
+  if (missing.length > 0) {
+    throw new DomainError("Enter a result for each analysis marked completed or reported.", "VALIDATION");
   }
   await prisma.$transaction(async (tx) => {
     for (const row of input.rows) {

@@ -5,7 +5,7 @@ const items = [
   { href: "/portal", label: "Dashboard" },
   { href: "/portal/requests/new", label: "New service request" },
   { href: "/portal/requests", label: "My requests" },
-  { href: "/portal/quotations", label: "Quotations" },
+  { href: "/portal/quotations", label: "Invoices" },
   { href: "/portal/payments", label: "Payments" },
   { href: "/portal/samples", label: "My samples" },
   { href: "/portal/reports", label: "Reports and certificates" },

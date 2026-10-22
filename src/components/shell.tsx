@@ -124,9 +124,9 @@ export function Facts({ items }: { items: [label: string, value: React.ReactNode
 }
 
 export function Status({ value }: { value: string }) {
-  const good = ["ACKNOWLEDGED", "COMPLETED", "VERIFIED", "REPORT_ISSUED", "ISSUED", "ACCEPTED", "CONFIRMED"].includes(value);
+  const good = ["ACKNOWLEDGED", "COMPLETED", "VERIFIED", "REPORT_ISSUED", "ACCEPTED", "CONFIRMED"].includes(value);
   const bad = ["REJECTED", "CANCELLED", "SUPERSEDED"].includes(value);
-  const wait = ["SUBMITTED", "RETURNED", "AWAITING_VERIFICATION", "AWAITING", "REFERENCE_SUBMITTED", "ISSUED"].includes(value);
+  const wait = ["SUBMITTED", "RETURNED", "AWAITING_VERIFICATION", "AWAITING", "REFERENCE_SUBMITTED", "ISSUED", "IN_ANALYSIS", "RESULTS_ENTERED", "ON_HOLD"].includes(value);
   const tone = bad ? "status-bad" : good ? "status-good" : wait ? "status-wait" : "";
   return <span className={`status ${tone}`}>{value.replaceAll("_", " ")}</span>;
 }

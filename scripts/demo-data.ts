@@ -206,16 +206,21 @@ async function seed() {
   }
 
   async function quote(c: Client, requestId: string, lines: [string, number][], outcome: "issued" | "accepted") {
-    const quotation = await commercial.createQuotation(finance, requestId);
-    for (const [code, quantity] of lines) await commercial.addQuotationLine(finance, quotation.id, { feeScheduleId: fees[code], quantity });
-    await commercial.issueQuotation(finance, quotation.id);
-    if (outcome === "accepted") await commercial.decideQuotation(c.userId, c.accountId, quotation.id, "ACCEPTED");
+    let quotation = await prisma.quotation.findFirst({ where: { requestId }, orderBy: { version: "desc" } });
+    if (!quotation) quotation = await commercial.createQuotation(finance, requestId);
+    if (quotation.status === "DRAFT") {
+      for (const [code, quantity] of lines) await commercial.addQuotationLine(finance, quotation.id, { feeScheduleId: fees[code], quantity });
+      quotation = await commercial.issueQuotation(finance, quotation.id);
+    }
+    if (outcome === "accepted" && quotation.status === "ISSUED") {
+      await commercial.decideQuotation(c.userId, c.accountId, quotation.id, "ACCEPTED");
+    }
   }
 
   async function pay(c: Client, requestId: string, method: PaymentMethod, reference: string | null, confirm: boolean) {
     const payment = await commercial.openPayment(finance, requestId, method);
-    if (reference) await commercial.recordPaymentReference(c.accountId, c.userId, payment.id, reference);
-    if (confirm) await commercial.confirmPayment(finance, payment.id, "Matched to bank statement (demo).");
+    if (reference && payment.status !== "CONFIRMED") await commercial.recordPaymentReference(c.accountId, c.userId, payment.id, reference);
+    if (confirm && payment.status !== "CONFIRMED") await commercial.confirmPayment(finance, payment.id, "Matched to bank statement (demo).");
   }
 
   // 1. Completed months ago: test report issued and paid.

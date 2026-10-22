@@ -193,7 +193,10 @@ async function buildReportContent(
   const performers = performerIds.map((id) => found.find((person) => person.id === id)).filter((person): person is NonNullable<typeof person> => Boolean(person));
   const env = job.envConditions[0];
   const usesTemplateStandard = job.analyses.some((analysis) => matchTemplateRow(kind, analysis.name));
-  const rows = job.analyses.map((analysis) => {
+  const printed = job.analyses.some((analysis) => analysis.reported)
+    ? job.analyses.filter((analysis) => analysis.reported)
+    : job.analyses;
+  const rows = printed.map((analysis) => {
     const matched = matchTemplateRow(kind, analysis.name);
     const requirement = analysis.result?.requirementText || matched?.requirement || "—";
     return {

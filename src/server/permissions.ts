@@ -45,7 +45,7 @@ export const NAV_ITEMS: { href: string; label: string; permission: string; group
   { href: "/internal/clients", label: "Clients", permission: "clients.read", group: "Laboratory" },
   { href: "/internal/jobs", label: "Work orders", permission: "jobs.read", group: "Laboratory" },
   { href: "/internal/reports", label: "Issued documents", permission: "reports.read", group: "Laboratory" },
-  { href: "/internal/quotations", label: "Quotations", permission: "quotations.read", group: "Commercial" },
+  { href: "/internal/quotations", label: "Invoices", permission: "quotations.read", group: "Commercial" },
   { href: "/internal/payments", label: "Payments", permission: "payments.read", group: "Commercial" },
   { href: "/internal/fees", label: "Fee schedule", permission: "fees.read", group: "Commercial" },
   { href: "/internal/admin/users", label: "Users", permission: "admin.users", group: "Administration" },

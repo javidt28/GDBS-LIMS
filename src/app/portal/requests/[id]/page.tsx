@@ -36,7 +36,7 @@ export default async function RequestDetail({
   const tabs = [
     ["overview", "Overview"],
     ["details", "Request details"],
-    ...(request.quotations.length ? [["quotation", "Quotation"]] : []),
+    ...(request.quotations.length ? [["invoice", "Invoice"]] : []),
     ...(request.payments.length ? [["payment", "Payment"]] : []),
     ...(request.samples.length ? [["samples", "Samples"]] : []),
     ["progress", "Progress"],
@@ -136,9 +136,9 @@ export default async function RequestDetail({
         </Card>
       )}
 
-      {tab === "quotation" && quotation && (
-        <Card title={`Quotation, version ${quotation.version}`} action={<Status value={quotation.status} />}>
-          {quotation.lines.length === 0 ? <p className="card-note">No lines.</p> : (
+      {tab === "invoice" && quotation && (
+        <Card title={`Invoice, version ${quotation.version}`} action={<Status value={quotation.status} />}>
+          {quotation.lines.length === 0 ? <p className="card-note">GDBS has not priced this invoice yet.</p> : (
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Description</th><th>Qty</th><th className="num">Amount</th></tr></thead>
@@ -153,17 +153,20 @@ export default async function RequestDetail({
           {quotation.status === "ISSUED" && (
             <div className="stack subform">
               {quotation.acceptanceTerms && <p className="card-note">{quotation.acceptanceTerms}</p>}
+              <p className="help">You can accept this invoice now, or pay first and accept afterwards.</p>
               <form action={clientQuotationAction} className="row-actions">
                 <input type="hidden" name="quotationId" value={quotation.id} />
-                <button className="btn btn-primary" name="decision" value="ACCEPTED">Accept quotation</button>
+                <button className="btn btn-primary" name="decision" value="ACCEPTED">Accept invoice</button>
+                <Link className="btn" href={`/portal/requests/${request.id}?tab=payment`}>Pay before accepting</Link>
               </form>
               <form action={clientQuotationAction} className="stack">
                 <input type="hidden" name="quotationId" value={quotation.id} />
                 <label>Reason for rejection<textarea name="reason" required /></label>
-                <button className="btn" name="decision" value="REJECTED">Reject quotation</button>
+                <button className="btn" name="decision" value="REJECTED">Reject invoice</button>
               </form>
             </div>
           )}
+          {quotation.status === "ACCEPTED" && <p className="card-note">Accepted. Submit a payment reference if you have not already paid.</p>}
           {quotation.status === "REJECTED" && <p className="card-note">Rejection: {quotation.rejectionReason}</p>}
         </Card>
       )}
@@ -178,11 +181,12 @@ export default async function RequestDetail({
               ["Confirmed", formatDateTime(payment.confirmedAt)],
             ]}
           />
-          <p className="help">A reference you submit is not a confirmed payment. GDBS confirms it after reconciliation. Banking instructions have not been loaded.</p>
-          {payment.status !== "CONFIRMED" && (
+          <p className="help">You may pay before accepting the invoice. A reference you submit is not confirmed until the accounts department signs it off.</p>
+          {payment.status !== "CONFIRMED" && payment.status !== "WAIVED" && (
             <form action={paymentReferenceAction} className="upload-row">
               <input type="hidden" name="paymentId" value={payment.id} />
-              <label>Payment reference<input name="reference" required /></label>
+              <input type="hidden" name="requestId" value={request.id} />
+              <label>Payment reference<input name="reference" required defaultValue={payment.clientReference ?? ""} /></label>
               <button className="btn" type="submit">Submit reference</button>
             </form>
           )}

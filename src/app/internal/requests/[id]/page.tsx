@@ -21,7 +21,7 @@ export default async function StaffRequestPage({
   const query = await searchParams;
   const request = await prisma.serviceRequest.findUnique({
     where: { id },
-    include: { samples: { include: { jobs: true } }, documents: true, quotations: true },
+    include: { samples: { include: { jobs: true } }, documents: true, quotations: { orderBy: { version: "desc" } }, payments: { orderBy: { createdAt: "desc" }, take: 1 } },
   });
   if (!request) notFound();
   const today = new Date().toISOString().slice(0, 10);
@@ -177,7 +177,7 @@ export default async function StaffRequestPage({
           {request.status === "SUBMITTED" && (
             <Card title="For official use" className="card-accent">
               <form action={verifyRequestAction} className="stack">
-                <p className="card-note">Section 4 of the request form. Choose a laboratory, then acknowledge, return, or reject.</p>
+                <p className="card-note">Section 4 of the request form. Choose a laboratory, then acknowledge, return, or reject. Acknowledging generates an invoice from matching approved fees.</p>
                 <input type="hidden" name="requestId" value={request.id} />
                 <label>Laboratory
                   <select name="assignedLab">
@@ -207,7 +207,22 @@ export default async function StaffRequestPage({
                 ["Laboratory", request.assignedLab],
                 ["Responded", formatDateTime(request.responseAt)],
                 ["Samples", String(request.samples.length)],
-                ["Quotations", String(request.quotations.length)],
+                [
+                  "Invoice",
+                  request.quotations[0]
+                    ? can(staff.role, "quotations.read")
+                      ? <Link key="q" href={`/internal/quotations/${request.quotations[0].id}`}>{request.quotations[0].status.replaceAll("_", " ")}</Link>
+                      : request.quotations[0].status.replaceAll("_", " ")
+                    : "Not generated",
+                ],
+                [
+                  "Payment",
+                  request.payments[0]
+                    ? can(staff.role, "payments.read")
+                      ? <Link key="p" href="/internal/payments">{request.payments[0].status.replaceAll("_", " ")}</Link>
+                      : request.payments[0].status.replaceAll("_", " ")
+                    : "Not opened",
+                ],
               ]}
             />
             {request.officialComments && <p className="card-note">{request.officialComments}</p>}

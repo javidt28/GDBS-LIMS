@@ -163,15 +163,20 @@ export default async function JobPage({
 
           <Card title={<>Verification checklist <span className="form-code">GDBS-QMF-024</span></>}>
             <form action={verificationAction} className="stack">
+              <p className="help">Mark the analyses that were done. A result is required only for those marked completed or reported.</p>
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Tests / analyses requested</th><th>Completed</th><th>Reported</th></tr></thead>
                   <tbody>
                     {job.analyses.map((analysis) => (
                       <tr key={analysis.id}>
-                        <td>{analysis.name}<input type="hidden" name="analysisId" value={analysis.id} /></td>
-                        <td><input aria-label={`${analysis.name} completed`} type="checkbox" name="completed" value={analysis.id} defaultChecked={analysis.completed} /></td>
-                        <td><input aria-label={`${analysis.name} reported`} type="checkbox" name="reported" value={analysis.id} defaultChecked={analysis.reported} /></td>
+                        <td>
+                          {analysis.name}
+                          {!analysis.result && <span className="help"> · no result yet</span>}
+                          <input type="hidden" name="analysisId" value={analysis.id} />
+                        </td>
+                        <td><input aria-label={`${analysis.name} completed`} type="checkbox" name="completed" value={analysis.id} defaultChecked={analysis.completed || Boolean(analysis.result)} /></td>
+                        <td><input aria-label={`${analysis.name} reported`} type="checkbox" name="reported" value={analysis.id} defaultChecked={analysis.reported || Boolean(analysis.result)} /></td>
                       </tr>
                     ))}
                   </tbody>
