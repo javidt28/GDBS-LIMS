@@ -4,9 +4,12 @@ import {
   PDFDocument,
   StandardFonts,
   TextRenderingMode,
+  clip,
   degrees,
+  endPath,
   popGraphicsState,
   pushGraphicsState,
+  rectangle,
   rgb,
   setLineWidth,
   setStrokingRgbColor,
@@ -55,14 +58,16 @@ export type CertificateContent = {
 
 const PAGE: [number, number] = [612, 792];
 const INK = rgb(0.08, 0.08, 0.08);
-const LINE = rgb(0.25, 0.25, 0.25);
-const FRAME = { left: 49, band: 102, right: 576, top: 105, bottom: 706 };
+const LINE = rgb(0.28, 0.28, 0.28);
+const GRAY = rgb(0.753, 0.753, 0.753);
+const FRAME = { left: 54, band: 117, right: 564, top: 100, bottom: 689 };
+const CERT_BAR = 19;
 const LABEL_X = 126;
 const VALUE_X = 205;
-const CONTENT_RIGHT = 572;
+const CONTENT_RIGHT = 560;
 /** Column edges of the RESULTS table on the QMF-043 Certificate sheet. */
-const COLUMNS = [124, 255, 342, 403, 469, 574];
-const SIGNATURE_COLUMNS = [124, 306, 469, 574];
+const COLUMNS = [124, 254, 335, 400, 465, 550];
+const SIGNATURE_COLUMNS = [124, 293, 465, 550];
 const WIN_ANSI_EXTRA = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ";
 
 let logoBytes: Promise<Buffer | null> | null = null;
@@ -81,34 +86,37 @@ export async function renderCertificatePdf(input: CertificateContent, options: {
     regular: await pdf.embedFont(StandardFonts.Helvetica),
     bold: await pdf.embedFont(StandardFonts.HelveticaBold),
     italic: await pdf.embedFont(StandardFonts.HelveticaOblique),
-    serif: await pdf.embedFont(StandardFonts.TimesRoman),
+    serif: await pdf.embedFont(StandardFonts.TimesRomanBold),
   };
   const pen = new Pen(page);
+  page.drawRectangle({ x: 0, y: 0, width: PAGE[0], height: PAGE[1], color: rgb(1, 1, 1) });
 
   const logo = await loadLogo();
   if (logo) {
     const image = await pdf.embedPng(logo);
-    const height = 50;
-    pen.image(image, 58, 47, (image.width / image.height) * height, height);
+    const height = 58;
+    pen.image(image, 44, 24, (image.width / image.height) * height, height);
   }
 
-  const centre = (FRAME.band + FRAME.right) / 2 + 2;
-  pen.centred("GRENADA BUREAU OF STANDARDS", centre, 56, fonts.bold, 15);
-  pen.centred(input.laboratory, centre, 67, fonts.bold, 8.5);
-  pen.centred("P.O. Box 2036, Queen's Park, St. George's, Grenada", centre, 78, fonts.regular, 7.5);
-  pen.centred("Tel: (473) 440-5886/6783    Fax: (473) 440-5554", centre, 88.5, fonts.regular, 7.5);
-  pen.centred("Email: gdbs@spiceisle.com    Website: www.gdbs.gd", centre, 99, fonts.regular, 7.5);
+  const centre = 340;
+  pen.centred("GRENADA BUREAU OF STANDARDS", centre, 42, fonts.bold, 16);
+  pen.centred(input.laboratory, centre, 56, fonts.bold, 9);
+  pen.centred("P.O. Box 2036, Queen's Park, St. George's, Grenada", centre, 68, fonts.regular, 8);
+  pen.centred("Tel: (473) 440-5886/6783    Fax: (473) 440-5554", centre, 80, fonts.regular, 8);
+  pen.centred("Email: gdbs@spiceisle.com    Website: www.gdbs.gd", centre, 91, fonts.regular, 8);
 
+  pen.fill(FRAME.left, FRAME.top, FRAME.band, FRAME.bottom, GRAY);
+  pen.fill(FRAME.band, FRAME.top, FRAME.right, FRAME.top + CERT_BAR, GRAY);
   pen.rect(FRAME.left, FRAME.top, FRAME.right, FRAME.bottom);
   pen.vline(FRAME.band, FRAME.top, FRAME.bottom);
-  pen.rect(240, FRAME.top, FRAME.right, FRAME.top + 16);
-  pen.centred(`Certificate No.  ${input.certificateNo}`, (240 + FRAME.right) / 2, FRAME.top + 11, fonts.bold, 8);
+  pen.rect(312, FRAME.top, FRAME.right, FRAME.top + CERT_BAR);
+  pen.centred(`Certificate No.  ${input.certificateNo}`, (312 + FRAME.right) / 2, FRAME.top + 13, fonts.bold, 9);
 
   drawSpineTitle(page, input.title, fonts.serif);
 
   const many = input.rows.length > 4;
-  const step = many ? 9.8 : 12.3;
-  let t = 134;
+  const step = many ? 9.8 : 11.6;
+  let t = 132;
   const heading = (text: string) => {
     pen.text(text, LABEL_X, t, fonts.bold, 7.5);
     t += step - 0.5;
@@ -142,12 +150,12 @@ export async function renderCertificatePdf(input: CertificateContent, options: {
   field("Procedure used", input.procedures);
   field("Standard used", input.standard);
 
-  const WARRANTY_H = 69;
-  const SIGNATURE_H = 64;
-  const PAGE_GAP = 22;
-  const CONDITIONS_H = 50;
-  const GAP_BEFORE_SIG = 18;
-  const TABLE_HEADER_H = 31;
+  const WARRANTY_H = 64;
+  const SIGNATURE_H = 66;
+  const PAGE_GAP = 10;
+  const CONDITIONS_H = 48;
+  const GAP_BEFORE_SIG = 28;
+  const TABLE_HEADER_H = 32;
   const warrantyTop = FRAME.bottom - WARRANTY_H;
   const tableTop = t + 2;
   const tableLeft = COLUMNS[0];
@@ -160,6 +168,7 @@ export async function renderCertificatePdf(input: CertificateContent, options: {
   const rowSize = rowHeight < 12 ? 6.6 : 7.5;
   const tableBottom = columnsBottom + rowHeight * rowCount;
 
+  pen.fill(tableLeft, tableTop, tableRight, columnsBottom, GRAY);
   pen.rect(tableLeft, tableTop, tableRight, tableBottom);
   pen.hline(tableLeft, tableRight, headerBottom);
   pen.hline(tableLeft, tableRight, columnsBottom);
@@ -203,8 +212,7 @@ export async function renderCertificatePdf(input: CertificateContent, options: {
     pen.text(`This certificate supersedes ${input.supersedes}, which remains on record.`, LABEL_X + 4, t, fonts.italic, 7);
   }
 
-  const maxSignatureBottom = warrantyTop - PAGE_GAP;
-  const signatureBottom = Math.min(maxSignatureBottom, many ? t + GAP_BEFORE_SIG + SIGNATURE_H : maxSignatureBottom);
+  const signatureBottom = warrantyTop - PAGE_GAP;
   const signatureTop = signatureBottom - SIGNATURE_H;
   pen.rect(SIGNATURE_COLUMNS[0], signatureTop, SIGNATURE_COLUMNS[3], signatureBottom);
   pen.hline(SIGNATURE_COLUMNS[0], SIGNATURE_COLUMNS[3], signatureTop + 11);
@@ -214,27 +222,27 @@ export async function renderCertificatePdf(input: CertificateContent, options: {
   pen.centred("Analysis performed by", middle(0), signatureTop + 8, fonts.bold, 7.5);
   pen.centred("Approved by", middle(1), signatureTop + 8, fonts.bold, 7.5);
   pen.centred("Date of Issue", middle(2), signatureTop + 8, fonts.bold, 7.5);
-  pen.hline(middle(0) - 60, middle(0) + 60, signatureTop + 39);
-  pen.hline(middle(1) - 55, middle(1) + 55, signatureTop + 39);
-  pen.centred(fit(input.performedBy, fonts.regular, 7.5, 176), middle(0), signatureTop + 48, fonts.regular, 7.5);
-  pen.centred(fit(input.performedRole, fonts.regular, 7.5, 176), middle(0), signatureTop + 58, fonts.regular, 7.5);
-  pen.centred(fit(input.approvedBy, fonts.regular, 7.5, 158), middle(1), signatureTop + 48, fonts.regular, 7.5);
-  pen.centred(input.approvedRole, middle(1), signatureTop + 58, fonts.regular, 7.5);
-  pen.centred(input.issuedAt, middle(2), signatureTop + 34, fonts.regular, 7.5);
+  pen.hline(middle(0) - 58, middle(0) + 58, signatureTop + 38);
+  pen.hline(middle(1) - 52, middle(1) + 52, signatureTop + 38);
+  pen.centred(fit(input.performedBy, fonts.regular, 7.5, 160), middle(0), signatureTop + 48, fonts.regular, 7.5);
+  pen.centred(fit(input.performedRole, fonts.regular, 7, 160), middle(0), signatureTop + 58, fonts.regular, 7);
+  pen.centred(fit(input.approvedBy, fonts.regular, 7.5, 150), middle(1), signatureTop + 48, fonts.regular, 7.5);
+  pen.centred(fit(input.approvedRole, fonts.regular, 7, 150), middle(1), signatureTop + 58, fonts.regular, 7);
+  pen.centred(input.issuedAt, middle(2), signatureTop + 40, fonts.regular, 10);
 
   const pageLabel = "Page 1 of 1";
-  pen.text(pageLabel, CONTENT_RIGHT - fonts.italic.widthOfTextAtSize(pageLabel, 7.5), signatureBottom + 11, fonts.italic, 7.5);
+  pen.text(pageLabel, CONTENT_RIGHT - fonts.italic.widthOfTextAtSize(pageLabel, 7.5), signatureBottom + 8, fonts.italic, 7.5);
 
   pen.hline(FRAME.band, FRAME.right, warrantyTop);
-  wrap(input.warranty, fonts.regular, 6.9, FRAME.right - FRAME.band - 8).forEach((line, index) => {
-    pen.text(line, FRAME.band + 4, warrantyTop + 9 + index * 8.4, fonts.regular, 6.9);
+  wrap(input.warranty, fonts.regular, 6.4, FRAME.right - FRAME.band - 8).forEach((line, index) => {
+    pen.text(line, FRAME.band + 4, warrantyTop + 8 + index * 7.4, fonts.regular, 6.4);
   });
 
-  pen.text(`Form No.: ${input.formNo}`, FRAME.left, 718, fonts.regular, 7);
-  pen.text(`Version No.: ${input.version}`, FRAME.left, 728, fonts.regular, 7);
-  pen.centred('"End of Report"', 312, 728, fonts.bold, 7.5);
-  pen.text(`Date Issued: ${input.formDate}`, 472, 718, fonts.regular, 7);
-  pen.text("Issued by Quality Manager", 472, 728, fonts.regular, 7);
+  pen.text(`Form No.: ${input.formNo}`, FRAME.left, 704, fonts.regular, 7);
+  pen.text(`Version No.: ${input.version}`, FRAME.left, 716, fonts.regular, 7);
+  pen.centred('"End of Report"', 309, 716, fonts.bold, 7.5);
+  pen.text(`Date Issued: ${input.formDate}`, 454, 704, fonts.regular, 7);
+  pen.text("Issued by Quality Manager", 454, 716, fonts.regular, 7);
 
   if (options.draft) drawDraftMark(page, fonts.bold);
 
@@ -243,14 +251,23 @@ export async function renderCertificatePdf(input: CertificateContent, options: {
 
 /** Vertical outlined title in the left band, reading bottom to top as on the template. */
 function drawSpineTitle(page: PDFPage, title: string, font: PDFFont) {
-  const length = FRAME.bottom - FRAME.top - 18;
-  const size = Math.min(52, length / font.widthOfTextAtSize(title, 1));
+  const bandWidth = FRAME.band - FRAME.left;
+  const length = FRAME.bottom - FRAME.top - 40;
+  const size = Math.min(38, length / font.widthOfTextAtSize(title, 1));
   const width = font.widthOfTextAtSize(title, size);
-  const x = FRAME.band - 14;
+  const x = FRAME.band - 12;
   const y = PAGE[1] - FRAME.bottom + (FRAME.bottom - FRAME.top - width) / 2;
-  page.pushOperators(pushGraphicsState(), setTextRenderingMode(TextRenderingMode.Outline), setStrokingRgbColor(0.15, 0.15, 0.15), setLineWidth(1));
+  page.pushOperators(
+    pushGraphicsState(),
+    rectangle(FRAME.left + 1.5, PAGE[1] - FRAME.bottom + 2, bandWidth - 3, FRAME.bottom - FRAME.top - 4),
+    clip(),
+    endPath(),
+    setTextRenderingMode(TextRenderingMode.FillAndOutline),
+    setStrokingRgbColor(0.1, 0.1, 0.1),
+    setLineWidth(0.75),
+  );
   page.drawText(title, { x, y, size, font, rotate: degrees(90), color: rgb(1, 1, 1) });
-  page.pushOperators(setTextRenderingMode(TextRenderingMode.Fill), popGraphicsState());
+  page.pushOperators(popGraphicsState());
 }
 
 function drawDraftMark(page: PDFPage, font: PDFFont) {
@@ -284,15 +301,19 @@ class Pen {
   }
 
   hline(x1: number, x2: number, t: number) {
-    this.page.drawLine({ start: { x: x1, y: PAGE[1] - t }, end: { x: x2, y: PAGE[1] - t }, thickness: 0.6, color: LINE });
+    this.page.drawLine({ start: { x: x1, y: PAGE[1] - t }, end: { x: x2, y: PAGE[1] - t }, thickness: 0.8, color: LINE });
   }
 
   vline(x: number, t1: number, t2: number) {
-    this.page.drawLine({ start: { x, y: PAGE[1] - t1 }, end: { x, y: PAGE[1] - t2 }, thickness: 0.6, color: LINE });
+    this.page.drawLine({ start: { x, y: PAGE[1] - t1 }, end: { x, y: PAGE[1] - t2 }, thickness: 0.8, color: LINE });
+  }
+
+  fill(x1: number, t1: number, x2: number, t2: number, color: ReturnType<typeof rgb>) {
+    this.page.drawRectangle({ x: x1, y: PAGE[1] - t2, width: x2 - x1, height: t2 - t1, color });
   }
 
   rect(x1: number, t1: number, x2: number, t2: number) {
-    this.page.drawRectangle({ x: x1, y: PAGE[1] - t2, width: x2 - x1, height: t2 - t1, borderColor: LINE, borderWidth: 0.6 });
+    this.page.drawRectangle({ x: x1, y: PAGE[1] - t2, width: x2 - x1, height: t2 - t1, borderColor: LINE, borderWidth: 0.8 });
   }
 
   image(image: Parameters<PDFPage["drawImage"]>[0], x: number, t: number, width: number, height: number) {
