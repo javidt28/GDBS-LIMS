@@ -4,18 +4,23 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "build": "prisma generate && next build",
+    "vercel-build": "prisma generate && DATABASE_URL=${DATABASE_URL_UNPOOLED:-$DATABASE_URL} prisma migrate deploy && next build",
     "start": "tsx scripts/start.ts",
     "test": "vitest run",
     "staff:create": "tsx scripts/create-staff.ts",
     "db:migrate": "tsx scripts/migrate.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "demo:seed": "tsx scripts/demo-data.ts seed",
+    "demo:clean": "tsx scripts/demo-data.ts clean"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "@vercel/blob": "^2.8.2",
     "next": "^15.5.27",
     "pdf-lib": "^1.17.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "resend": "^6.34.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

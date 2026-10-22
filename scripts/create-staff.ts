@@ -7,17 +7,17 @@ if (!email || !password || !fullName) {
   process.exit(1);
 }
 
+const local = !process.env.DATABASE_URL;
 process.env.DATABASE_URL ??= "postgresql://gdbs:gdbs@127.0.0.1:54329/gdbs_lims";
 
 async function main() {
-  const { startPostgres } = await import("./postgres");
-  const pg = await startPostgres();
+  const pg = local ? await (await import("./postgres")).startPostgres() : null;
   try {
     const { bootstrapAdministrator } = await import("../src/server/accounts");
     const staff = await bootstrapAdministrator({ email: email!, password: password!, fullName: fullName! });
     console.log(`Created administrator ${staff.email}`);
   } finally {
-    await pg.stop();
+    await pg?.stop();
   }
 }
 

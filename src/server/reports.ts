@@ -1,8 +1,8 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import type { ReportKind } from "@prisma/client";
-import { REPORT_WARRANTY, TEMPLATE_META, UNCERTAINTY_STATEMENT, matchTemplateRow } from "@/lib/catalogue";
+import type { LabCode, Prisma, ReportKind, StaffRole } from "@prisma/client";
+import { REPORT_WARRANTY, TEMPLATE_META, UNCERTAINTY_STATEMENT, assessResult, matchTemplateRow } from "@/lib/catalogue";
 import { audit } from "./audit";
 import type { StaffActor } from "./accounts";
+import { renderCertificatePdf, type CertificateContent } from "./certificate-pdf";
 import { DomainError } from "./errors";
 import { notify } from "./notify";
 import { assertCan } from "./permissions";
@@ -10,84 +10,37 @@ import { prisma } from "./prisma";
 import { certificateNumber, nextSequence } from "./sequences";
 import { readPrivateBytes, savePrivateBytes } from "./storage";
 
-const FOOTER_CONTACT = "P.O. Box 2036, Queen's Park, St. George's, Grenada  Tel: (473) 440-5886/6783  Fax: (473) 440-5554  Email: gdbs@spiceisle.com  Website: www.gdbs.gd";
+const reportJobInclude = {
+  sample: { include: { request: true } },
+  analyses: { include: { result: true }, orderBy: { sortOrder: "asc" } },
+  envConditions: { where: { supersededAt: null }, orderBy: { revision: "desc" }, take: 1 },
+  verification: true,
+  reports: { where: { status: "ISSUED" }, orderBy: { revision: "desc" } },
+} satisfies Prisma.JobInclude;
+
+type ReportJob = Prisma.JobGetPayload<{ include: typeof reportJobInclude }>;
+
+const DISCIPLINE: Record<LabCode, string | null> = { AL: "Chemical Analysis", MBL: "Microbiological Analysis", EA: null };
+const ROLE_TITLE: Partial<Record<StaffRole, string>> = { TECHNICAL_OFFICER: "Technical Officer", ANALYST: "Analyst" };
 
 export async function issueReport(actor: StaffActor, jobId: string, kind: ReportKind) {
   assertCan(actor.role, "reports.issue");
-  const job = await prisma.job.findUnique({
-    where: { id: jobId },
-    include: {
-      sample: { include: { request: true } },
-      analyses: { include: { result: true }, orderBy: { sortOrder: "asc" } },
-      envConditions: { where: { supersededAt: null }, orderBy: { revision: "desc" }, take: 1 },
-      verification: true,
-      reports: { where: { status: "ISSUED" }, orderBy: { revision: "desc" } },
-    },
-  });
-  if (!job) throw new DomainError("Work order not found.", "NOT_FOUND");
+  const job = await loadJobForReport(jobId);
   if (job.status !== "VERIFIED" || !job.verification?.verifiedAt) {
     throw new DomainError("The work order must be verified before a report is issued.");
   }
-  const enterers = new Set(job.analyses.map((analysis) => analysis.result?.enteredById).filter(Boolean));
-  if (enterers.has(actor.id)) {
+  if (enteredBy(job).includes(actor.id)) {
     throw new DomainError("The person who entered the results cannot issue the report.");
   }
-  const meta = TEMPLATE_META[kind];
-  const performerIds = [...enterers] as string[];
-  const performers = await prisma.staffUser.findMany({ where: { id: { in: performerIds } } });
-  const env = job.envConditions[0];
   const year = new Date().getUTCFullYear();
-  const previous = job.reports[0];
+  const previous = job.reports.find((report) => report.status === "ISSUED");
   const sampleIndex = 1;
-
-  const rows = job.analyses.map((analysis) => {
-    const matched = matchTemplateRow(kind, analysis.name);
-    return {
-      analysis: analysis.name,
-      requirement: analysis.result?.requirementText || matched?.requirement || "—",
-      actual: analysis.result?.actualValue || "—",
-      uncertainty: analysis.result?.uncertainty || matched?.uncertainty || "—",
-      comments: analysis.result?.comments || "—",
-    };
-  });
-
-  const content = {
-    formNo: meta.formNo,
-    version: meta.version,
-    formDate: meta.dateIssued,
-    title: meta.title,
-    laboratory: meta.laboratory,
-    clientName: job.sample.request?.clientName || "—",
-    clientAddress: job.sample.request?.clientAddress || "—",
-    sampleDescription: job.sample.description,
-    brandName: job.sample.brandName || "—",
-    manufacturer: job.sample.manufacturer || "—",
-    lotNo: job.sample.lotNo || "—",
-    bestBefore: formatDay(job.sample.bestBefore),
-    sizeQuantity: job.sample.sizeQuantity || "—",
-    history: job.sample.history || "—",
-    dateSampled: formatDay(job.sample.dateSampled),
-    dateCollected: formatDay(job.sample.dateCollected),
-    dateOfAnalysis: [formatDay(job.dateStarted), formatDay(job.dateCompleted)].filter((value) => value !== "—").join(" to ") || "—",
-    analysisPerformed: meta.analysisPerformed,
-    placeOfAnalysis: job.placeOfAnalysis || "—",
-    procedures: job.procedures || "—",
-    standard: meta.standard,
-    rows,
-    temperature: formatPair(env?.tempStartC?.toString(), env?.tempEndC?.toString(), "°C"),
-    humidity: formatPair(env?.humidityStart?.toString(), env?.humidityEnd?.toString(), "%"),
-    performedBy: performers.map((person) => person.fullName).join(", ") || "—",
-    approvedBy: actor.fullName,
-    approvedRole: "Head: Technical Services",
-    warranty: REPORT_WARRANTY,
-    uncertaintyStatement: UNCERTAINTY_STATEMENT,
-    supersedes: previous?.certificateNo ?? null,
-  };
+  const content = await buildReportContent(job, kind, actor, previous?.certificateNo ?? null);
 
   return prisma.$transaction(async (tx) => {
     const sequence = await nextSequence(tx, `cert:${year}:${job.lab}`);
     const certificateNo = certificateNumber(year, job.lab, sequence);
-    const pdf = await renderPdf({ ...content, certificateNo, sampleIndex: String(sampleIndex).padStart(3, "0"), issuedAt: new Date().toISOString().slice(0, 10) });
+    const pdf = await renderCertificatePdf({ ...content, certificateNo: `${certificateNo}/${String(sampleIndex).padStart(3, "0")}` });
     const stored = await savePrivateBytes(pdf, ".pdf");
     if (previous) {
       await tx.report.update({
@@ -205,131 +158,89 @@ export async function readIssuedReport(reportId: string, accountId?: string) {
   return { report, bytes };
 }
 
-async function renderPdf(input: {
-  title: string;
-  laboratory: string;
-  formNo: string;
-  version: string;
-  formDate: string;
-  certificateNo: string;
-  sampleIndex: string;
-  issuedAt: string;
-  clientName: string;
-  clientAddress: string;
-  sampleDescription: string;
-  brandName: string;
-  manufacturer: string;
-  lotNo: string;
-  bestBefore: string;
-  sizeQuantity: string;
-  history: string;
-  dateSampled: string;
-  dateCollected: string;
-  dateOfAnalysis: string;
-  analysisPerformed: string;
-  placeOfAnalysis: string;
-  procedures: string;
-  standard: string;
-  rows: { analysis: string; requirement: string; actual: string; uncertainty: string; comments: string }[];
-  temperature: string;
-  humidity: string;
-  performedBy: string;
-  approvedBy: string;
-  approvedRole: string;
-  warranty: string;
-  uncertaintyStatement: string;
-  supersedes: string | null;
-}) {
-  const pdf = await PDFDocument.create();
-  const pageSize: [number, number] = [595.28, 841.89];
-  let page = pdf.addPage(pageSize);
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  let y = 800;
-  const left = 48;
-  const width = 500;
 
-  const draw = (text: string, options?: { bold?: boolean; size?: number }) => {
-    const size = options?.size ?? 9;
-    const face = options?.bold ? bold : font;
-    const lines = wrap(text, face, size, width);
-    for (const line of lines) {
-      if (y < 64) {
-        page = pdf.addPage(pageSize);
-        y = 800;
-      }
-      page.drawText(line, { x: left, y, size, font: face, color: rgb(0.1, 0.1, 0.1) });
-      y -= size + 3;
-    }
-  };
-
-  draw("GRENADA BUREAU OF STANDARDS", { bold: true, size: 12 });
-  draw(input.laboratory, { bold: true, size: 10 });
-  draw(FOOTER_CONTACT, { size: 8 });
-  y -= 8;
-  draw(input.title, { bold: true, size: 14 });
-  draw(`Certificate / Report No. ${input.certificateNo}/${input.sampleIndex}`);
-  draw(`Date of issue ${input.issuedAt}`);
-  if (input.supersedes) draw(`This document supersedes ${input.supersedes}. The earlier document remains on record.`);
-  y -= 6;
-  draw("Client", { bold: true });
-  draw(`${input.clientName}`);
-  draw(input.clientAddress);
-  y -= 4;
-  draw("Sample", { bold: true });
-  draw(`Product / sample: ${input.sampleDescription}`);
-  draw(`Brand: ${input.brandName}`);
-  draw(`Manufacturer: ${input.manufacturer}`);
-  draw(`Batch / lot: ${input.lotNo}`);
-  draw(`Best before: ${input.bestBefore}`);
-  draw(`Size / quantity: ${input.sizeQuantity}`);
-  draw(`Sample history: ${input.history}`);
-  draw(`Date sampled: ${input.dateSampled}`);
-  draw(`Date collected: ${input.dateCollected}`);
-  y -= 4;
-  draw("Service", { bold: true });
-  draw(`Date(s) of analysis: ${input.dateOfAnalysis}`);
-  draw(`Analysis performed: ${input.analysisPerformed}`);
-  draw(`Place of analysis: ${input.placeOfAnalysis}`);
-  draw(`Procedure(s) used: ${input.procedures}`);
-  draw(`Standard used: ${input.standard}`);
-  y -= 4;
-  draw("Results", { bold: true });
-  for (const row of input.rows) {
-    draw(`${row.analysis}`, { bold: true });
-    draw(`Requirement: ${row.requirement}    Actual: ${row.actual}    Uncertainty (k=2): ${row.uncertainty}`);
-    draw(`Comments: ${row.comments}`);
-  }
-  y -= 4;
-  draw(input.uncertaintyStatement, { size: 8 });
-  draw(`Temperature: ${input.temperature}    Humidity: ${input.humidity}`);
-  y -= 6;
-  draw(`Analysis performed by: ${input.performedBy}`);
-  draw(`Approved by: ${input.approvedBy}`);
-  draw(input.approvedRole);
-  y -= 6;
-  draw(input.warranty, { size: 8 });
-  y -= 8;
-  draw(`Form No. ${input.formNo}    Version ${input.version}    Date issued ${input.formDate}    Issued by Quality Manager`, { size: 8 });
-  draw('"End of Report"', { size: 8 });
-  return Buffer.from(await pdf.save());
+/** Renders the certificate from the current recorded results without numbering, storing, or issuing it. */
+export async function previewReport(actor: StaffActor, jobId: string, kind: ReportKind) {
+  assertCan(actor.role, "jobs.read");
+  const job = await loadJobForReport(jobId);
+  const approver = job.verification?.verifiedById
+    ? await prisma.staffUser.findUnique({ where: { id: job.verification.verifiedById } })
+    : null;
+  const previous = job.reports.find((report) => report.status === "ISSUED");
+  const content = await buildReportContent(job, kind, approver ?? { fullName: "Pending approval" }, previous?.certificateNo ?? null);
+  return renderCertificatePdf({ ...content, certificateNo: "Assigned on issue" }, { draft: true });
 }
 
-function wrap(text: string, font: { widthOfTextAtSize: (text: string, size: number) => number }, size: number, max: number) {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (font.widthOfTextAtSize(next, size) > max && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = next;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length ? lines : [""];
+async function loadJobForReport(jobId: string) {
+  const job = await prisma.job.findUnique({ where: { id: jobId }, include: reportJobInclude });
+  if (!job) throw new DomainError("Work order not found.", "NOT_FOUND");
+  return job;
+}
+
+function enteredBy(job: ReportJob) {
+  return [...new Set(job.analyses.map((analysis) => analysis.result?.enteredById).filter((id): id is string => Boolean(id)))];
+}
+
+async function buildReportContent(
+  job: ReportJob,
+  kind: ReportKind,
+  approver: { fullName: string },
+  supersedes: string | null,
+): Promise<Omit<CertificateContent, "certificateNo">> {
+  const meta = TEMPLATE_META[kind];
+  const performerIds = enteredBy(job);
+  const found = await prisma.staffUser.findMany({ where: { id: { in: performerIds } } });
+  const performers = performerIds.map((id) => found.find((person) => person.id === id)).filter((person): person is NonNullable<typeof person> => Boolean(person));
+  const env = job.envConditions[0];
+  const usesTemplateStandard = job.analyses.some((analysis) => matchTemplateRow(kind, analysis.name));
+  const rows = job.analyses.map((analysis) => {
+    const matched = matchTemplateRow(kind, analysis.name);
+    const requirement = analysis.result?.requirementText || matched?.requirement || "—";
+    return {
+      analysis: matched?.analysis || analysis.name,
+      requirement,
+      actual: analysis.result?.actualValue || "—",
+      uncertainty: analysis.result?.uncertainty || matched?.uncertainty || "—",
+      comments: analysis.result?.comments || assessResult(requirement, analysis.result?.actualValue) || "—",
+    };
+  });
+  const lead = performers[0];
+  const discipline = DISCIPLINE[job.lab];
+  const leadTitle = lead ? ROLE_TITLE[lead.role] ?? "Laboratory" : "";
+  return {
+    formNo: meta.formNo,
+    version: meta.version,
+    formDate: meta.dateIssued,
+    title: meta.title,
+    laboratory: meta.laboratory,
+    issuedAt: grenadaDay(new Date()),
+    clientName: job.sample.request?.clientName || "—",
+    clientAddress: job.sample.request?.clientAddress || "—",
+    sampleDescription: job.sample.description,
+    brandName: job.sample.brandName || "—",
+    manufacturer: job.sample.manufacturer || "—",
+    lotNo: job.sample.lotNo || "—",
+    bestBefore: formatDay(job.sample.bestBefore),
+    sizeQuantity: job.sample.sizeQuantity || "—",
+    history: job.sample.history || "—",
+    dateSampled: formatDay(job.sample.dateSampled),
+    dateCollected: formatDay(job.sample.dateCollected),
+    dateOfAnalysis: analysisDates(job.dateStarted, job.dateCompleted),
+    analysisPerformed: job.analysisPerformed || meta.analysisPerformed,
+    placeOfAnalysis: job.placeOfAnalysis || "—",
+    procedures: job.procedures || "—",
+    standard: job.standardUsed || (usesTemplateStandard ? meta.standard : "—"),
+    rows,
+    temperature: average(env?.tempStartC?.toString(), env?.tempEndC?.toString()),
+    humidity: average(env?.humidityStart?.toString(), env?.humidityEnd?.toString()),
+    performedBy: performers.map((person) => person.fullName).join(", ") || "—",
+    performedRole: lead ? (discipline ? `${leadTitle}: ${discipline}` : leadTitle) : "",
+    approvedBy: approver.fullName,
+    approvedRole: "Head: Technical Services",
+    warranty: REPORT_WARRANTY,
+    uncertaintyStatement: UNCERTAINTY_STATEMENT,
+    supersedes,
+  };
 }
 
 function formatDay(value: Date | null | undefined) {
@@ -337,7 +248,21 @@ function formatDay(value: Date | null | undefined) {
   return value.toISOString().slice(0, 10);
 }
 
-function formatPair(start?: string | null, end?: string | null, unit?: string) {
-  if (!start && !end) return "—";
-  return `${start ?? "—"} to ${end ?? "—"} ${unit ?? ""}`.trim();
+function grenadaDay(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Grenada", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
+}
+
+function analysisDates(start: Date | null, end: Date | null) {
+  const first = start ? grenadaDay(start) : null;
+  const last = end ? grenadaDay(end) : null;
+  if (first && last && first !== last) return `${first} to ${last}`;
+  return first ?? last ?? "—";
+}
+
+/** Laboratory conditions are reported as the mean of the start and end readings, as on the template. */
+function average(start?: string | null, end?: string | null) {
+  const values = [start, end].filter((value): value is string => Boolean(value)).map(Number).filter(Number.isFinite);
+  if (values.length === 0) return "—";
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return String(Math.round(mean * 10) / 10);
 }

@@ -16,7 +16,7 @@ const items = [
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const user = await requireClient();
   return (
-    <AppFrame title="Client portal" items={items} accountLabel={user.fullName} realm="client">
+    <AppFrame title="Client portal" items={items} accountName={user.fullName} accountRole="Client" realm="client">
       {children}
     </AppFrame>
   );

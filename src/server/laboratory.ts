@@ -1,4 +1,5 @@
 import type { AnalysisBasis, LabCode, Prisma, ServiceClass } from "@prisma/client";
+import { assessResult } from "@/lib/catalogue";
 import { audit } from "./audit";
 import type { StaffActor } from "./accounts";
 import { DomainError } from "./errors";
@@ -81,6 +82,8 @@ export async function createJob(
     analysisNames: string[];
     procedures?: string;
     placeOfAnalysis?: string;
+    standardUsed?: string;
+    analysisPerformed?: string;
     assigneeId?: string;
   },
 ) {
@@ -107,6 +110,8 @@ export async function createJob(
         sampleId: sample.id,
         procedures: empty(input.procedures),
         placeOfAnalysis: empty(input.placeOfAnalysis),
+        standardUsed: empty(input.standardUsed),
+        analysisPerformed: empty(input.analysisPerformed),
         assigneeId: input.assigneeId || actor.id,
         analyses: {
           create: names.map((name, index) => ({ name, sortOrder: index })),
@@ -122,6 +127,41 @@ export async function createJob(
       after: { jobNo: job.jobNo, lab: job.lab, serviceClass: job.serviceClass },
     });
     return job;
+  });
+}
+
+export async function saveJobDetails(
+  actor: StaffActor,
+  jobId: string,
+  input: { procedures?: string; placeOfAnalysis?: string; standardUsed?: string; analysisPerformed?: string },
+) {
+  assertCan(actor.role, "results.write");
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job) throw new DomainError("Work order not found.", "NOT_FOUND");
+  assertJobEditable(job.status);
+  await prisma.$transaction(async (tx) => {
+    await tx.job.update({
+      where: { id: jobId },
+      data: {
+        procedures: empty(input.procedures),
+        placeOfAnalysis: empty(input.placeOfAnalysis),
+        standardUsed: empty(input.standardUsed),
+        analysisPerformed: empty(input.analysisPerformed),
+      },
+    });
+    await audit(tx, {
+      entity: "Job",
+      entityId: jobId,
+      action: "job.details.save",
+      actorId: actor.id,
+      actorType: "STAFF",
+      after: {
+        procedures: empty(input.procedures),
+        placeOfAnalysis: empty(input.placeOfAnalysis),
+        standardUsed: empty(input.standardUsed),
+        analysisPerformed: empty(input.analysisPerformed),
+      },
+    });
   });
 }
 
@@ -201,6 +241,9 @@ export async function saveResult(
   if (!input.actualValue.trim()) throw new DomainError("Enter the result.", "VALIDATION");
   const analysis = await loadAnalysis(analysisId);
   assertJobEditable(analysis.job.status);
+  const actualValue = input.actualValue.trim();
+  const requirementText = empty(input.requirementText);
+  const comments = empty(input.comments) ?? assessResult(requirementText, actualValue);
   const locked = Boolean(analysis.result?.lockedAt);
   if (locked && !input.reason?.trim()) {
     throw new DomainError("A reviewed result cannot be overwritten without a reason.", "VALIDATION");
@@ -224,11 +267,11 @@ export async function saveResult(
         where: { jobAnalysisId: analysisId },
         data: {
           revision: analysis.result.revision + 1,
-          actualValue: input.actualValue.trim(),
+          actualValue,
           units: empty(input.units),
-          requirementText: empty(input.requirementText),
+          requirementText,
           uncertainty: empty(input.uncertainty),
-          comments: empty(input.comments),
+          comments,
           enteredById: actor.id,
           enteredAt: new Date(),
           lockedAt: null,
@@ -238,11 +281,11 @@ export async function saveResult(
       await tx.result.update({
         where: { jobAnalysisId: analysisId },
         data: {
-          actualValue: input.actualValue.trim(),
+          actualValue,
           units: empty(input.units),
-          requirementText: empty(input.requirementText),
+          requirementText,
           uncertainty: empty(input.uncertainty),
-          comments: empty(input.comments),
+          comments,
           enteredById: actor.id,
           enteredAt: new Date(),
         },
@@ -251,11 +294,11 @@ export async function saveResult(
       await tx.result.create({
         data: {
           jobAnalysisId: analysisId,
-          actualValue: input.actualValue.trim(),
+          actualValue,
           units: empty(input.units),
-          requirementText: empty(input.requirementText),
+          requirementText,
           uncertainty: empty(input.uncertainty),
-          comments: empty(input.comments),
+          comments,
           enteredById: actor.id,
         },
       });
@@ -275,7 +318,7 @@ export async function saveResult(
       actorId: actor.id,
       actorType: "STAFF",
       reason: input.reason,
-      after: { actualValue: input.actualValue.trim() },
+      after: { actualValue, comments },
     });
   });
 }

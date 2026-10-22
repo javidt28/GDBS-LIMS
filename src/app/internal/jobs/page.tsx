@@ -23,7 +23,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
         <div className="table-wrap">
           <table>
             <thead><tr><th>Job</th><th>Sample</th><th>Class</th><th>Status</th></tr></thead>
-            <tbody>{jobs.map((job) => <tr key={job.id}><td><Link href={`/internal/jobs/${job.id}`}>{job.jobNo}</Link></td><td>{job.sample.description}</td><td>{job.serviceClass}</td><td><Status value={job.status} /></td></tr>)}</tbody>
+            <tbody>{jobs.map((job) => <tr key={job.id}><td><Link href={`/internal/jobs/${job.id}`}>{job.jobNo}</Link></td><td>{job.sample.description}</td><td>{job.serviceClass.replaceAll("_", " ").toLowerCase().replace(/^./, (c) => c.toUpperCase())}</td><td><Status value={job.status} /></td></tr>)}</tbody>
           </table>
         </div>
       )}

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Empty, PageHeading, Status } from "@/components/shell";
 import { prisma } from "@/server/prisma";
 import { requireClient } from "@/server/session";
@@ -27,7 +28,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <tbody>
               {reports.map((report) => (
                 <tr key={report.id}>
-                  <td>{report.certificateNo}/{String(report.sampleIndex).padStart(3, "0")}</td>
+                  <td><Link href={`/portal/reports/${report.id}`}>{report.certificateNo}/{String(report.sampleIndex).padStart(3, "0")}</Link></td>
                   <td>{report.job.sample.request?.reference ?? "—"}</td>
                   <td><Status value={report.status} /></td>
                   <td>{report.issuedAt.toISOString().slice(0, 10)}</td>

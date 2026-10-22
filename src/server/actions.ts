@@ -15,8 +15,9 @@ import {
   type StaffActor,
 } from "@/server/accounts";
 import { addQuotationLine, confirmPayment, createFee, createQuotation, decideQuotation, issueQuotation, openPayment, recordPaymentReference, setAcceptanceTerms } from "@/server/commercial";
+import { appUrl, sendLinkEmail } from "@/server/email";
 import { DomainError, isDomainError } from "@/server/errors";
-import { createJob, decideVerification, receiveSample, saveEnvironment, saveReadings, saveResult, submitVerification } from "@/server/laboratory";
+import { createJob, decideVerification, receiveSample, saveEnvironment, saveJobDetails, saveReadings, saveResult, submitVerification } from "@/server/laboratory";
 import { prisma } from "@/server/prisma";
 import { issueReport, openReportCorrection } from "@/server/reports";
 import { saveRequestDraft, submitRequest, verifyRequest, type RequestDraft } from "@/server/requests";
@@ -55,7 +56,9 @@ export async function registerAction(formData: FormData) {
   if (!parsed.success) redirect("/create-account?error=Check+the+name,+email,+and+password.");
   try {
     const result = await registerClient(parsed.data);
-    const devLink = process.env.NODE_ENV === "production" ? "" : `&devToken=${encodeURIComponent(result.verifyToken)}`;
+    const link = appUrl(`/verify-email?token=${encodeURIComponent(result.verifyToken)}`);
+    const sent = await sendLinkEmail({ kind: "verify", to: parsed.data.email, link, token: result.verifyToken });
+    const devLink = sent || process.env.NODE_ENV === "production" ? "" : `&devToken=${encodeURIComponent(result.verifyToken)}`;
     redirect(`/create-account?sent=1${devLink}`);
   } catch (error) {
     redirect(`/create-account?error=${encodeURIComponent(fail(error))}`);
@@ -96,7 +99,10 @@ export async function forgotPasswordAction(formData: FormData) {
   "use server";
   const email = String(formData.get("email") ?? "");
   const result = await requestPasswordReset(email);
-  const devLink = result.token && process.env.NODE_ENV !== "production" ? `&devToken=${encodeURIComponent(result.token)}` : "";
+  const sent = result.token
+    ? await sendLinkEmail({ kind: "reset", to: email, link: appUrl(`/reset-password?token=${encodeURIComponent(result.token)}`), token: result.token })
+    : false;
+  const devLink = result.token && !sent && process.env.NODE_ENV !== "production" ? `&devToken=${encodeURIComponent(result.token)}` : "";
   redirect(`/forgot-password?sent=1${devLink}`);
 }
 
@@ -302,12 +308,31 @@ export async function createJobAction(formData: FormData) {
       analysisNames: formData.getAll("analysis").map(String),
       procedures: String(formData.get("procedures") ?? ""),
       placeOfAnalysis: String(formData.get("placeOfAnalysis") ?? ""),
+      standardUsed: String(formData.get("standardUsed") ?? ""),
+      analysisPerformed: String(formData.get("analysisPerformed") ?? ""),
     });
     redirect(`/internal/jobs/${job.id}`);
   } catch (error) {
     if (isRedirect(error)) throw error;
     redirect(`/internal/requests/${requestId}?error=${encodeURIComponent(fail(error))}`);
   }
+}
+
+export async function jobDetailsAction(formData: FormData) {
+  "use server";
+  const staff = await staffActor();
+  const jobId = String(formData.get("jobId"));
+  try {
+    await saveJobDetails(staff, jobId, {
+      procedures: String(formData.get("procedures") ?? ""),
+      placeOfAnalysis: String(formData.get("placeOfAnalysis") ?? ""),
+      standardUsed: String(formData.get("standardUsed") ?? ""),
+      analysisPerformed: String(formData.get("analysisPerformed") ?? ""),
+    });
+  } catch (error) {
+    redirect(`/internal/jobs/${jobId}?error=${encodeURIComponent(fail(error))}`);
+  }
+  redirect(`/internal/jobs/${jobId}`);
 }
 
 export async function readingsAction(formData: FormData) {

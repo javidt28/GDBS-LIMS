@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Banner, PageHeading, Status } from "@/components/shell";
+import { formatDate, formatDateTime, humanize } from "@/lib/format";
+import { Banner, Card, Facts, PageHeading, Status } from "@/components/shell";
 import { clientQuotationAction, paymentReferenceAction, uploadAction } from "@/server/actions";
 import { DomainError } from "@/server/errors";
 import { prisma } from "@/server/prisma";
 import { clientProgress, getRequestForAccount } from "@/server/requests";
 import { requireClient } from "@/server/session";
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  "request.submit": "Request submitted",
+  "request.acknowledged": "Request acknowledged by GDBS",
+  "request.returned": "Request returned for changes",
+  "request.rejected": "Request rejected",
+};
 
 export default async function RequestDetail({
   params,
@@ -45,114 +53,187 @@ export default async function RequestDetail({
     orderBy: { createdAt: "desc" },
   });
   const quotation = request.quotations[0];
+  const payment = request.payments[0];
+  const editable = request.status === "DRAFT" || request.status === "RETURNED";
+  const service = [humanize(request.serviceType), request.serviceTypeOther].filter(Boolean).join(" · ");
+
+  const progress = (
+    <ol className="steps-track">
+      {steps.map((step) => (
+        <li key={step.label} className={step.done ? "done" : undefined}>
+          <span className="steps-dot" aria-hidden="true" />
+          <span>{step.label}</span>
+          {step.done && <span className="sr-only"> (done)</span>}
+        </li>
+      ))}
+    </ol>
+  );
+
+  const uploadForm = (
+    <form action={uploadAction} className="upload-row">
+      <input type="hidden" name="requestId" value={request.id} />
+      <label>Supporting document<input type="file" name="file" accept="application/pdf,image/png,image/jpeg" required /></label>
+      <button className="btn" type="submit">Upload</button>
+    </form>
+  );
+
   return (
     <>
-      <PageHeading title={request.reference} crumbs={[{ href: "/portal/requests", label: "My requests" }]} action={<Status value={request.status} />} />
+      <PageHeading
+        title={request.reference}
+        crumbs={[{ href: "/portal/requests", label: "My requests" }]}
+        meta={<>{service || "Service not selected"}{request.submittedAt && <> · Submitted {formatDate(request.submittedAt)}</>}</>}
+        action={<Status value={request.status} />}
+      />
       <Banner error={query.error} ok={query.submitted ? "Request submitted." : query.draft ? "Draft saved." : undefined} />
       {request.status === "RETURNED" && <p className="banner-error">Returned: {request.returnReason}</p>}
       {request.status === "REJECTED" && <p className="banner-error">Rejected: {request.rejectionReason}</p>}
-      <div className="tabs">
+
+      <nav className="tabs tabs-pill" aria-label="Request sections">
         {tabs.map(([key, label]) => (
           <Link key={key} href={`/portal/requests/${request.id}?tab=${key}`} aria-current={tab === key ? "page" : undefined}>{label}</Link>
         ))}
-      </div>
+      </nav>
+
       {tab === "overview" && (
-        <div className="stack">
-          <p>{request.clientName} · {request.serviceType ?? "Service not selected"}</p>
-          {(request.status === "DRAFT" || request.status === "RETURNED") && <Link className="btn" href={`/portal/requests/${request.id}/edit`}>Continue request</Link>}
+        <div className="detail-grid">
+          <div className="detail-main">
+            <Card
+              title="Summary"
+              action={editable && <Link className="btn btn-primary" href={`/portal/requests/${request.id}/edit`}>Continue request</Link>}
+            >
+              <Facts
+                items={[
+                  ["Client", request.clientName],
+                  ["Service", service],
+                  ["Samples", String(request.samples.length)],
+                  ["Documents", String(request.documents.length)],
+                  ["Last updated", formatDateTime(request.updatedAt)],
+                  ["Submitted", formatDateTime(request.submittedAt)],
+                ]}
+              />
+            </Card>
+            <Card title="Add a supporting document">{uploadForm}</Card>
+          </div>
+          <aside className="detail-side">
+            <Card title="Progress">{progress}</Card>
+          </aside>
         </div>
       )}
+
       {tab === "details" && (
-        <dl className="stack">
-          <div><dt>Address</dt><dd>{request.clientAddress || "—"}</dd></div>
-          <div><dt>Contact</dt><dd>{request.contactPerson || "—"} · {request.contactNo || "—"} · {request.contactEmail || "—"}</dd></div>
-          <div><dt>Description</dt><dd>{request.description || "—"}</dd></div>
-          <div><dt>Decision rule acknowledged</dt><dd>{request.decisionRuleAck ? `Yes, ${request.signatureName}` : "No"}</dd></div>
-          {request.samples.map((sample) => (
-            <div key={sample.id}><dt>Sample</dt><dd>{sample.description}{sample.brandName ? ` · ${sample.brandName}` : ""}</dd></div>
-          ))}
-        </dl>
+        <Card title="Request details">
+          <Facts
+            items={[
+              ["Contact person", request.contactPerson],
+              ["Phone", request.contactNo],
+              ["Email", request.contactEmail],
+              ["Decision rule acknowledged", request.decisionRuleAck ? `Yes, ${request.signatureName}` : "No"],
+              ["Address", request.clientAddress, true],
+              ["Description", request.description, true],
+            ]}
+          />
+        </Card>
       )}
+
       {tab === "quotation" && quotation && (
-        <div className="stack">
-          <p>Version {quotation.version} <Status value={quotation.status} /></p>
-          {quotation.lines.length === 0 ? <p>No lines.</p> : (
+        <Card title={`Quotation, version ${quotation.version}`} action={<Status value={quotation.status} />}>
+          {quotation.lines.length === 0 ? <p className="card-note">No lines.</p> : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Description</th><th>Qty</th><th>Amount</th></tr></thead>
+                <thead><tr><th>Description</th><th>Qty</th><th className="num">Amount</th></tr></thead>
                 <tbody>
                   {quotation.lines.map((line) => (
-                    <tr key={line.id}><td>{line.description}</td><td>{line.quantity}</td><td>{line.currency} {line.amount.toString()}</td></tr>
+                    <tr key={line.id}><td>{line.description}</td><td>{line.quantity}</td><td className="num">{line.currency} {line.amount.toString()}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
           {quotation.status === "ISSUED" && (
-            <>
-              <p>{quotation.acceptanceTerms}</p>
+            <div className="stack subform">
+              {quotation.acceptanceTerms && <p className="card-note">{quotation.acceptanceTerms}</p>}
               <form action={clientQuotationAction} className="row-actions">
                 <input type="hidden" name="quotationId" value={quotation.id} />
-                <button className="btn btn-primary" name="decision" value="ACCEPTED">Accept</button>
+                <button className="btn btn-primary" name="decision" value="ACCEPTED">Accept quotation</button>
               </form>
               <form action={clientQuotationAction} className="stack">
                 <input type="hidden" name="quotationId" value={quotation.id} />
                 <label>Reason for rejection<textarea name="reason" required /></label>
                 <button className="btn" name="decision" value="REJECTED">Reject quotation</button>
               </form>
-            </>
+            </div>
           )}
-          {quotation.status === "REJECTED" && <p>Rejection: {quotation.rejectionReason}</p>}
-        </div>
+          {quotation.status === "REJECTED" && <p className="card-note">Rejection: {quotation.rejectionReason}</p>}
+        </Card>
       )}
-      {tab === "payment" && request.payments[0] && (
-        <div className="stack">
-          <p><Status value={request.payments[0].status} /> {request.payments[0].amount ? `${request.payments[0].currency} ${request.payments[0].amount.toString()}` : "Amount not set"}</p>
+
+      {tab === "payment" && payment && (
+        <Card title="Payment" action={<Status value={payment.status} />}>
+          <Facts
+            items={[
+              ["Amount", payment.amount ? `${payment.currency} ${payment.amount.toString()}` : "Amount not set"],
+              ["Your reference", payment.clientReference],
+              ["Reference submitted", formatDateTime(payment.referenceSubmittedAt)],
+              ["Confirmed", formatDateTime(payment.confirmedAt)],
+            ]}
+          />
           <p className="help">A reference you submit is not a confirmed payment. GDBS confirms it after reconciliation. Banking instructions have not been loaded.</p>
-          {request.payments[0].status !== "CONFIRMED" && (
-            <form action={paymentReferenceAction} className="stack">
-              <input type="hidden" name="paymentId" value={request.payments[0].id} />
+          {payment.status !== "CONFIRMED" && (
+            <form action={paymentReferenceAction} className="upload-row">
+              <input type="hidden" name="paymentId" value={payment.id} />
               <label>Payment reference<input name="reference" required /></label>
               <button className="btn" type="submit">Submit reference</button>
             </form>
           )}
-        </div>
+        </Card>
       )}
+
       {tab === "samples" && (
-        <ul>
-          {request.samples.map((sample) => (
-            <li key={sample.id}>{sample.description} — {sample.receivedAt ? `Received ${sample.receivedAt.toISOString().slice(0, 16)}` : "Not yet received"}</li>
-          ))}
-        </ul>
+        <Card title="Samples">
+          <ul className="list list-flush">
+            {request.samples.map((sample) => (
+              <li key={sample.id}>
+                <div className="list-row">
+                  <span>
+                    <strong>{sample.description}</strong>
+                    <small>{sample.receivedAt ? `Received ${formatDateTime(sample.receivedAt)}` : "Not yet received"}</small>
+                  </span>
+                  <span className={sample.receivedAt ? "chip chip-good" : "chip"}>{sample.receivedAt ? "Received" : "Pending"}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
-      {tab === "progress" && (
-        <ol className="timeline">
-          {steps.map((step) => (
-            <li key={step.label}><span className={step.done ? "dot on" : "dot"} /><span>{step.label}</span></li>
-          ))}
-        </ol>
-      )}
+
+      {tab === "progress" && <Card title="Progress">{progress}</Card>}
+
       {tab === "documents" && (
-        <div className="stack">
-          <ul>{request.documents.map((document) => <li key={document.id}><a href={`/files/documents/${document.id}`}>{document.filename}</a></li>)}</ul>
-          <form action={uploadAction} className="stack">
-            <input type="hidden" name="requestId" value={request.id} />
-            <label>Supporting document<input type="file" name="file" accept="application/pdf,image/png,image/jpeg" required /></label>
-            <button className="btn" type="submit">Upload</button>
-          </form>
-        </div>
+        <Card title="Documents">
+          <ul className="file-list">
+            {request.documents.map((document) => (
+              <li key={document.id}><a href={`/files/documents/${document.id}`}>{document.filename}</a></li>
+            ))}
+          </ul>
+          <div className="subform">{uploadForm}</div>
+        </Card>
       )}
+
       {tab === "activity" && (
-        activity.length === 0 ? <p>No activity yet.</p> : (
-          <ul>{activity.map((event) => <li key={event.id}>{event.createdAt.toISOString().slice(0, 16)} — {event.action}{event.reason ? `: ${event.reason}` : ""}</li>)}</ul>
-        )
-      )}
-      {tab === "overview" && (
-        <form action={uploadAction} className="stack" style={{ marginTop: "1rem" }}>
-          <input type="hidden" name="requestId" value={request.id} />
-          <label>Supporting document<input type="file" name="file" accept="application/pdf,image/png,image/jpeg" /></label>
-          <button className="btn" type="submit">Upload</button>
-        </form>
+        <Card title="Activity">
+          {activity.length === 0 ? <p className="card-note">No activity yet.</p> : (
+            <ol className="activity">
+              {activity.map((event) => (
+                <li key={event.id}>
+                  <strong>{ACTIVITY_LABELS[event.action] ?? humanize(event.action)}</strong>
+                  <small>{formatDateTime(event.createdAt)}</small>
+                  {event.reason && <p>{event.reason}</p>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
       )}
     </>
   );

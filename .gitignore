@@ -12,3 +12,6 @@ next-env.d.ts
 coverage
 .DS_Store
 .idea
+.vercel
+.env*
+!.env.example

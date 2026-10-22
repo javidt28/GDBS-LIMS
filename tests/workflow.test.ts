@@ -129,6 +129,14 @@ describe("sample testing path", () => {
     const originalHash = createHash("sha256").update(originalBytes).digest("hex");
     expect(originalHash).toBe(issued.sha256);
     expect(issued.certificateNo).toMatch(/^2026AL\d+$/);
+    expect(originalBytes.subarray(0, 5).toString()).toBe("%PDF-");
+    const content = issued.content as { rows: { analysis: string; requirement: string; actual: string; comments: string }[]; standard: string; formNo: string };
+    expect(content.formNo).toBe("GDBS-QMF-043");
+    expect(content.standard).toBe("GDS 12: 1992 - Specification for Wheat Flour");
+    expect(content.rows).toEqual([
+      expect.objectContaining({ analysis: "Moisture Content", requirement: "15% (max)", actual: "12.1", comments: "Pass" }),
+      expect.objectContaining({ analysis: "Protein", requirement: "7% (min)", actual: "8.0", comments: "Pass" }),
+    ]);
 
     await expect(getRequestForAccount(other.accountId, submitted.request.id)).rejects.toBeInstanceOf(DomainError);
     const own = await readIssuedReport(issued.id, client.accountId);

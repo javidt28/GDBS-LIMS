@@ -249,6 +249,12 @@ export async function openPayment(actor: StaffActor, requestId: string, method: 
     include: { quotations: { where: { status: "ACCEPTED" }, orderBy: { version: "desc" }, take: 1, include: { lines: true } } },
   });
   if (!request) throw new DomainError("Request not found.", "NOT_FOUND");
+  if (request.status !== "ACKNOWLEDGED" && request.status !== "COMPLETED") {
+    throw new DomainError("A payment can be opened only for an acknowledged request.");
+  }
+  if (await prisma.payment.count({ where: { requestId } })) {
+    throw new DomainError("This request already has a payment record.");
+  }
   const accepted = request.quotations[0];
   const amount = accepted ? accepted.lines.reduce((sum, line) => sum + Number(line.amount), 0) : null;
   return prisma.payment.create({

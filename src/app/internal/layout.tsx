@@ -7,9 +7,10 @@ export default async function InternalLayout({ children }: { children: React.Rea
   if (!staff) return children;
   return (
     <AppFrame
-      title="GDBS internal"
+      title="Staff workspace"
       items={navFor(staff.role)}
-      accountLabel={`${staff.fullName} · ${staff.role.replaceAll("_", " ")}`}
+      accountName={staff.fullName}
+      accountRole={staff.role.replaceAll("_", " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}
       realm="staff"
     >
       {children}
