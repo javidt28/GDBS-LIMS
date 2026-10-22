@@ -1,36 +1,40 @@
 import Link from "next/link";
-import { Empty, PageHeading, Status } from "@/components/shell";
+import { Empty, PageHeading } from "@/components/shell";
+import { can } from "@/server/permissions";
 import { prisma } from "@/server/prisma";
 import { requireStaff } from "@/server/session";
+import { jobListInclude, WorkOrdersTable } from "../jobs/work-orders-table";
 
 export default async function WorkPage() {
   const staff = await requireStaff();
+  if (!can(staff.role, "jobs.read")) return <Empty>You do not have permission to view work orders.</Empty>;
   const mine = staff.role === "ANALYST" || staff.role === "TECHNICAL_OFFICER";
   const jobs = await prisma.job.findMany({
     where: mine ? { assigneeId: staff.id } : { status: { notIn: ["REPORT_ISSUED", "CANCELLED"] } },
-    include: { sample: true },
+    include: jobListInclude,
     orderBy: { updatedAt: "desc" },
     take: 50,
   });
+  const assigneeIds = [...new Set(jobs.map((job) => job.assigneeId).filter((id): id is string => Boolean(id)))];
+  const assignees = assigneeIds.length
+    ? Object.fromEntries(
+        (await prisma.staffUser.findMany({ where: { id: { in: assigneeIds } }, select: { id: true, fullName: true } })).map(
+          (person) => [person.id, person.fullName],
+        ),
+      )
+    : {};
   return (
     <>
-      <PageHeading title="My work" />
-      {jobs.length === 0 ? <Empty>No work orders are assigned.</Empty> : (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Job</th><th>Sample</th><th>Status</th></tr></thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr key={job.id}>
-                  <td><Link href={`/internal/jobs/${job.id}`}>{job.jobNo}</Link></td>
-                  <td>{job.sample.description}</td>
-                  <td><Status value={job.status} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <PageHeading
+        title="My work"
+        meta={mine ? "Work orders assigned to you." : "Open work orders across the laboratory."}
+        action={<Link className="btn" href="/internal/jobs">All work orders</Link>}
+      />
+      <WorkOrdersTable
+        jobs={jobs}
+        assignees={assignees}
+        empty={mine ? "No work orders are assigned to you." : "No open work orders."}
+      />
     </>
   );
 }

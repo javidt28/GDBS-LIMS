@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Empty, PageHeading, Status } from "@/components/shell";
 import { clientQuotationAction } from "@/server/actions";
 import { prisma } from "@/server/prisma";
@@ -12,8 +13,8 @@ export default async function QuotationsPage() {
   });
   return (
     <>
-      <PageHeading title="Quotations" />
-      {quotations.length === 0 ? <Empty>No quotations have been issued. Rates are not loaded until GDBS approves them.</Empty> : (
+      <PageHeading title="Invoices" meta="Accept or reject each invoice. You can pay before accepting." />
+      {quotations.length === 0 ? <Empty>No invoices yet. One is issued when GDBS acknowledges a request.</Empty> : (
         <div className="stack">
           {quotations.map((quotation) => (
             <article key={quotation.id} className="panel">
@@ -24,9 +25,11 @@ export default async function QuotationsPage() {
                 <form action={clientQuotationAction} className="stack">
                   <input type="hidden" name="quotationId" value={quotation.id} />
                   <p>{quotation.acceptanceTerms}</p>
-                  <button className="btn btn-primary" name="decision" value="ACCEPTED">Accept</button>
+                  <p className="help">You can accept this invoice now, or pay first and accept afterwards.</p>
+                  <button className="btn btn-primary" name="decision" value="ACCEPTED">Accept invoice</button>
+                  <Link className="btn" href={`/portal/requests/${quotation.requestId}?tab=payment`}>Pay before accepting</Link>
                   <label>Rejection reason<textarea name="reason" /></label>
-                  <button className="btn" name="decision" value="REJECTED">Reject</button>
+                  <button className="btn" name="decision" value="REJECTED">Reject invoice</button>
                 </form>
               )}
             </article>

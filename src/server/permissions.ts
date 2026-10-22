@@ -37,21 +37,21 @@ export function assertCan(role: StaffRole, permission: string) {
   }
 }
 
-export const NAV_ITEMS: { href: string; label: string; permission: string }[] = [
-  { href: "/internal", label: "Dashboard", permission: "jobs.read" },
-  { href: "/internal/work", label: "My work", permission: "jobs.read" },
-  { href: "/internal/requests", label: "Requests", permission: "requests.read" },
-  { href: "/internal/clients", label: "Clients", permission: "clients.read" },
-  { href: "/internal/jobs", label: "Work orders", permission: "jobs.read" },
-  { href: "/internal/quotations", label: "Quotations", permission: "quotations.read" },
-  { href: "/internal/payments", label: "Payments", permission: "payments.read" },
-  { href: "/internal/fees", label: "Fee schedule", permission: "fees.read" },
-  { href: "/internal/reports", label: "Issued documents", permission: "reports.read" },
-  { href: "/internal/notifications", label: "Notifications", permission: "jobs.read" },
-  { href: "/internal/admin/users", label: "Users", permission: "admin.users" },
-  { href: "/internal/admin/numbering", label: "Numbering", permission: "admin.numbering" },
-  { href: "/internal/admin/audit", label: "Audit trail", permission: "admin.audit" },
-  { href: "/internal/admin/settings", label: "Settings", permission: "admin.settings" },
+export const NAV_ITEMS: { href: string; label: string; permission: string; group: string }[] = [
+  { href: "/internal", label: "Dashboard", permission: "jobs.read", group: "Workspace" },
+  { href: "/internal/work", label: "My work", permission: "jobs.read", group: "Workspace" },
+  { href: "/internal/notifications", label: "Notifications", permission: "jobs.read", group: "Workspace" },
+  { href: "/internal/requests", label: "Requests", permission: "requests.read", group: "Laboratory" },
+  { href: "/internal/clients", label: "Clients", permission: "clients.read", group: "Laboratory" },
+  { href: "/internal/jobs", label: "Work orders", permission: "jobs.read", group: "Laboratory" },
+  { href: "/internal/reports", label: "Issued documents", permission: "reports.read", group: "Laboratory" },
+  { href: "/internal/quotations", label: "Invoices", permission: "quotations.read", group: "Commercial" },
+  { href: "/internal/payments", label: "Payments", permission: "payments.read", group: "Commercial" },
+  { href: "/internal/fees", label: "Fee schedule", permission: "fees.read", group: "Commercial" },
+  { href: "/internal/admin/users", label: "Users", permission: "admin.users", group: "Administration" },
+  { href: "/internal/admin/numbering", label: "Numbering", permission: "admin.numbering", group: "Administration" },
+  { href: "/internal/admin/audit", label: "Audit trail", permission: "admin.audit", group: "Administration" },
+  { href: "/internal/admin/settings", label: "Settings", permission: "admin.settings", group: "Administration" },
 ];
 
 export function navFor(role: StaffRole) {

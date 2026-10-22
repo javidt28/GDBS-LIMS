@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { hashPassword } from "@/server/crypto";
-import { addQuotationLine, createFee, createQuotation, decideQuotation, issueQuotation, setAcceptanceTerms } from "@/server/commercial";
+import { addQuotationLine, confirmPayment, createFee, createQuotation, decideQuotation, issueQuotation, recordPaymentReference, setAcceptanceTerms } from "@/server/commercial";
 import { DomainError } from "@/server/errors";
 import { createJob, receiveSample, saveResult, submitVerification, decideVerification } from "@/server/laboratory";
 import { prisma } from "@/server/prisma";
 import { issueReport, openReportCorrection, readIssuedReport } from "@/server/reports";
-import { getRequestForAccount, saveRequestDraft, submitRequest } from "@/server/requests";
+import { getRequestForAccount, saveRequestDraft, submitRequest, verifyRequest } from "@/server/requests";
 import { registerClient, verifyEmail } from "@/server/accounts";
 import type { StaffActor } from "@/server/accounts";
 import { readPrivateBytes } from "@/server/storage";
@@ -129,6 +129,14 @@ describe("sample testing path", () => {
     const originalHash = createHash("sha256").update(originalBytes).digest("hex");
     expect(originalHash).toBe(issued.sha256);
     expect(issued.certificateNo).toMatch(/^2026AL\d+$/);
+    expect(originalBytes.subarray(0, 5).toString()).toBe("%PDF-");
+    const content = issued.content as { rows: { analysis: string; requirement: string; actual: string; comments: string }[]; standard: string; formNo: string };
+    expect(content.formNo).toBe("GDBS-QMF-043");
+    expect(content.standard).toBe("GDS 12: 1992 - Specification for Wheat Flour");
+    expect(content.rows).toEqual([
+      expect.objectContaining({ analysis: "Moisture Content", requirement: "15% (max)", actual: "12.1", comments: "Pass" }),
+      expect.objectContaining({ analysis: "Protein", requirement: "7% (min)", actual: "8.0", comments: "Pass" }),
+    ]);
 
     await expect(getRequestForAccount(other.accountId, submitted.request.id)).rejects.toBeInstanceOf(DomainError);
     const own = await readIssuedReport(issued.id, client.accountId);
@@ -148,6 +156,54 @@ describe("sample testing path", () => {
     const old = await prisma.report.findUniqueOrThrow({ where: { id: issued.id } });
     expect(old.status).toBe("SUPERSEDED");
     expect(revised.revision).toBe(2);
+  });
+
+  it("submits verification for completed analyses without waiting for the rest", async () => {
+    const client = await makeClient("eva@example.com");
+    const reception = await makeStaff("RECEPTION", "Desk");
+    const analyst = await makeStaff("ANALYST", "Chemist");
+    const draft = await saveRequestDraft(client.accountId, client.id, null, {
+      clientName: "Eva Client",
+      serviceType: "TESTING",
+      decisionRuleAck: true,
+      signatureName: "Eva Client",
+      samples: [{ description: "Wheat flour" }],
+    });
+    const submitted = await submitRequest(client.accountId, client.id, draft.id, {
+      clientName: "Eva Client",
+      serviceType: "TESTING",
+      decisionRuleAck: true,
+      signatureName: "Eva Client",
+      samples: [{ description: "Wheat flour" }],
+    });
+    await verifyRequestSafe(reception, submitted.request.id);
+    const sample = await prisma.sample.findFirstOrThrow({ where: { requestId: submitted.request.id } });
+    await receiveSample(reception, sample.id, { analysisBasis: "STANDARD_COMPLIANCE" });
+    const job = await createJob(reception, {
+      sampleId: sample.id,
+      lab: "AL",
+      jobDate: "2026-03-01",
+      serviceClass: "TECHNICAL_SERVICES",
+      analysisNames: ["Moisture Content (%)", "Protein (%)"],
+    });
+    const analyses = await prisma.jobAnalysis.findMany({ where: { jobId: job.id }, orderBy: { sortOrder: "asc" } });
+    await saveResult(analyst, analyses[0].id, { actualValue: "13.2" });
+    await expect(
+      submitVerification(
+        analyst,
+        job.id,
+        { rows: analyses.map((analysis) => ({ analysisId: analysis.id, completed: true, reported: true })) },
+      ),
+    ).rejects.toThrow(/Enter a result for each analysis marked completed or reported/);
+    await submitVerification(analyst, job.id, {
+      rows: analyses.map((analysis) => ({
+        analysisId: analysis.id,
+        completed: analysis.id === analyses[0].id,
+        reported: analysis.id === analyses[0].id,
+      })),
+    });
+    const updated = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
+    expect(updated.status).toBe("AWAITING_VERIFICATION");
   });
 
   it("hides conformity assessment work from the client portal", async () => {
@@ -219,6 +275,55 @@ describe("quotations", () => {
     expect(rejected.status).toBe("REJECTED");
     const audit = await prisma.auditLog.findFirst({ where: { entityId: quotation.id, action: "quotation.reject" } });
     expect(audit?.reason).toBe("Price not agreed");
+  });
+
+  it("issues an invoice on acknowledge and lets the client pay before accepting", async () => {
+    const client = await makeClient("ina@example.com");
+    const reception = await makeStaff("RECEPTION", "InaDesk");
+    const finance = await makeStaff("FINANCE", "InaAccounts");
+    const admin = await makeStaff("ADMINISTRATOR", "InaAdmin");
+    await createFee(admin, {
+      code: "MOIST-INVOICE",
+      name: "Moisture content",
+      unit: "per sample",
+      amount: "55.00",
+      currency: "XCD",
+      effectiveFrom: "2026-01-01",
+    });
+    await setAcceptanceTerms(admin, "I accept this invoice.");
+    const draft = await saveRequestDraft(client.accountId, client.id, null, {
+      clientName: "Ina Client",
+      serviceType: "TESTING",
+      description: "Moisture check on flour",
+      decisionRuleAck: true,
+      signatureName: "Ina Client",
+      samples: [{ description: "Wheat flour" }],
+    });
+    const submitted = await submitRequest(client.accountId, client.id, draft.id, {
+      clientName: "Ina Client",
+      serviceType: "TESTING",
+      description: "Moisture check on flour",
+      decisionRuleAck: true,
+      signatureName: "Ina Client",
+      samples: [{ description: "Wheat flour" }],
+    });
+    await verifyRequest(reception, submitted.request.id, "ACKNOWLEDGED", { assignedLab: "AL" });
+    const invoice = await prisma.quotation.findFirstOrThrow({
+      where: { requestId: submitted.request.id },
+      include: { lines: true },
+    });
+    expect(invoice.status).toBe("ISSUED");
+    expect(invoice.lines).toHaveLength(1);
+    const payment = await prisma.payment.findFirstOrThrow({ where: { requestId: submitted.request.id } });
+    expect(payment.status).toBe("AWAITING");
+    expect(Number(payment.amount)).toBe(55);
+    await recordPaymentReference(client.accountId, client.id, payment.id, "DEP-BEFORE-ACCEPT");
+    await decideQuotation(client.id, client.accountId, invoice.id, "ACCEPTED");
+    await expect(confirmPayment(finance, payment.id, "")).rejects.toThrow(/sign-off/);
+    await confirmPayment(finance, payment.id, "Funds received and signed off.");
+    const signed = await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(signed.status).toBe("CONFIRMED");
+    expect(signed.confirmedById).toBe(finance.id);
   });
 });
 

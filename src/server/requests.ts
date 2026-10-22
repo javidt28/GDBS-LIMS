@@ -6,6 +6,7 @@ import { prisma, type Tx } from "./prisma";
 import { assertCan } from "./permissions";
 import { nextSequence, requestReference } from "./sequences";
 import type { StaffActor } from "./accounts";
+import { generateInvoiceOnAcknowledge } from "./commercial";
 
 export type SampleDraft = {
   description: string;
@@ -130,7 +131,7 @@ export async function verifyRequest(
   input: { assignedLab?: LabCode | null; officialComments?: string; reason?: string },
 ) {
   assertCan(actor.role, "requests.verify");
-  const request = await prisma.serviceRequest.findUnique({ where: { id: requestId }, include: { submittedBy: true } });
+  const request = await prisma.serviceRequest.findUnique({ where: { id: requestId }, include: { submittedBy: true, samples: true } });
   if (!request) throw new DomainError("Request not found.", "NOT_FOUND");
   if (!STAFF_TRANSITIONS[request.status].includes(decision)) {
     throw new DomainError("That decision is not available for this request.");
@@ -163,9 +164,12 @@ export async function verifyRequest(
       after: { status: decision, assignedLab: updated.assignedLab },
       reason: input.reason,
     });
+    if (decision === "ACKNOWLEDGED") {
+      await generateInvoiceOnAcknowledge(tx, actor, request.id);
+    }
     if (request.submittedById) {
       const copy = {
-        ACKNOWLEDGED: ["Request acknowledged", `${request.reference} has been acknowledged by GDBS.`],
+        ACKNOWLEDGED: ["Request acknowledged", `${request.reference} has been acknowledged. Review the invoice; you can pay before accepting it.`],
         RETURNED: ["Request returned", `${request.reference} was returned: ${input.reason?.trim()}`],
         REJECTED: ["Request rejected", `${request.reference} was rejected: ${input.reason?.trim()}`],
       }[decision];
@@ -174,7 +178,7 @@ export async function verifyRequest(
         kind: `REQUEST_${decision}`,
         title: copy[0],
         body: copy[1],
-        href: `/portal/requests/${request.id}`,
+        href: `/portal/requests/${request.id}${decision === "ACKNOWLEDGED" ? "?tab=invoice" : ""}`,
         dedupeKey: `request.${decision}:${request.id}:${updated.responseAt?.toISOString()}`,
       });
     }
@@ -262,10 +266,15 @@ export async function clientProgress(requestId: string, accountId: string) {
   const testing = jobs.some((job) => ["IN_ANALYSIS", "RESULTS_ENTERED", "CREATED"].includes(job.status));
   const review = jobs.some((job) => ["AWAITING_VERIFICATION", "VERIFIED"].includes(job.status));
   const issued = jobs.some((job) => job.reports.some((report) => report.status === "ISSUED"));
+  const invoice = request.quotations[0];
+  const payment = request.payments[0];
   const steps = [
     { label: "Draft", done: true },
     { label: "Submitted", done: request.status !== "DRAFT" },
     { label: "Acknowledged", done: ["ACKNOWLEDGED", "COMPLETED"].includes(request.status) },
+    { label: "Invoice issued", done: Boolean(invoice && ["ISSUED", "ACCEPTED"].includes(invoice.status)) },
+    { label: "Invoice accepted", done: invoice?.status === "ACCEPTED" },
+    { label: "Payment confirmed", done: payment?.status === "CONFIRMED" },
     { label: "Sample received", done: received },
     { label: "Testing in progress", done: testing || review || issued },
     { label: "Technical review", done: review || issued },

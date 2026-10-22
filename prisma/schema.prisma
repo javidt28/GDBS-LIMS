@@ -124,35 +124,35 @@ enum ActorType {
 }
 
 model ClientAccount {
-  id                    String      @id @default(cuid())
-  kind                  AccountKind @default(INDIVIDUAL)
-  name                  String      @default("")
-  address               String?
-  contactPerson         String?
-  contactNo             String?
-  email                 String?
-  profileCompletedAt    DateTime?
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
-  users                 ClientUser[]
-  requests              ServiceRequest[]
-  samples               Sample[]
+  id                 String           @id @default(cuid())
+  kind               AccountKind      @default(INDIVIDUAL)
+  name               String           @default("")
+  address            String?
+  contactPerson      String?
+  contactNo          String?
+  email              String?
+  profileCompletedAt DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  users              ClientUser[]
+  requests           ServiceRequest[]
+  samples            Sample[]
 }
 
 model ClientUser {
-  id              String        @id @default(cuid())
-  accountId       String
-  account         ClientAccount @relation(fields: [accountId], references: [id])
-  email           String        @unique
-  passwordHash    String
-  fullName        String
-  emailVerifiedAt DateTime?
-  disabledAt      DateTime?
-  createdAt       DateTime      @default(now())
-  sessions        Session[]
-  notifications   Notification[]
-  submittedRequests ServiceRequest[] @relation("RequestSubmitter")
-  quotationDecisions Quotation[] @relation("QuotationDecider")
+  id                 String           @id @default(cuid())
+  accountId          String
+  account            ClientAccount    @relation(fields: [accountId], references: [id])
+  email              String           @unique
+  passwordHash       String
+  fullName           String
+  emailVerifiedAt    DateTime?
+  disabledAt         DateTime?
+  createdAt          DateTime         @default(now())
+  sessions           Session[]
+  notifications      Notification[]
+  submittedRequests  ServiceRequest[] @relation("RequestSubmitter")
+  quotationDecisions Quotation[]      @relation("QuotationDecider")
 }
 
 model StaffUser {
@@ -231,34 +231,34 @@ model ServiceRequest {
 }
 
 model Sample {
-  id                 String         @id @default(cuid())
-  origin             SampleOrigin   @default(CLIENT_REQUEST)
+  id                 String          @id @default(cuid())
+  origin             SampleOrigin    @default(CLIENT_REQUEST)
   requestId          String?
   request            ServiceRequest? @relation(fields: [requestId], references: [id])
   accountId          String?
-  account            ClientAccount? @relation(fields: [accountId], references: [id])
+  account            ClientAccount?  @relation(fields: [accountId], references: [id])
   description        String
   brandName          String?
   sizeQuantity       String?
   manufacturer       String?
   lotNo              String?
-  bestBefore         DateTime?      @db.Date
+  bestBefore         DateTime?       @db.Date
   collectionPoint    String?
   receiptNo          String?
   comments           String?
   collectorSignature String?
   history            String?
   storageLocation    String?
-  storedOn           DateTime?      @db.Date
+  storedOn           DateTime?       @db.Date
   analysisBasis      AnalysisBasis?
   analysisBasisOther String?
   sampleSize         String?
-  dateSampled        DateTime?      @db.Date
-  dateCollected      DateTime?      @db.Date
+  dateSampled        DateTime?       @db.Date
+  dateCollected      DateTime?       @db.Date
   receivedAt         DateTime?
   receivedById       String?
   conditionNotes     String?
-  createdAt          DateTime       @default(now())
+  createdAt          DateTime        @default(now())
   jobs               Job[]
 
   @@index([requestId])
@@ -266,26 +266,28 @@ model Sample {
 }
 
 model Job {
-  id              String       @id @default(cuid())
-  jobNo           String       @unique
-  daySequence     Int
-  jobDate         DateTime     @db.Date
-  lab             LabCode
-  serviceClass    ServiceClass @default(TECHNICAL_SERVICES)
-  status          JobStatus    @default(CREATED)
-  sampleId        String
-  sample          Sample       @relation(fields: [sampleId], references: [id])
-  assigneeId      String?
-  dateStarted     DateTime?
-  dateCompleted   DateTime?
-  procedures      String?
-  placeOfAnalysis String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  analyses        JobAnalysis[]
-  envConditions   EnvCondition[]
-  verification    Verification?
-  reports         Report[]
+  id                String         @id @default(cuid())
+  jobNo             String         @unique
+  daySequence       Int
+  jobDate           DateTime       @db.Date
+  lab               LabCode
+  serviceClass      ServiceClass   @default(TECHNICAL_SERVICES)
+  status            JobStatus      @default(CREATED)
+  sampleId          String
+  sample            Sample         @relation(fields: [sampleId], references: [id])
+  assigneeId        String?
+  dateStarted       DateTime?
+  dateCompleted     DateTime?
+  procedures        String?
+  placeOfAnalysis   String?
+  standardUsed      String?
+  analysisPerformed String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  analyses          JobAnalysis[]
+  envConditions     EnvCondition[]
+  verification      Verification?
+  reports           Report[]
 
   @@unique([jobDate, lab, daySequence])
   @@index([status, lab])
@@ -294,34 +296,34 @@ model Job {
 }
 
 model JobAnalysis {
-  id         String   @id @default(cuid())
-  jobId      String
-  job        Job      @relation(fields: [jobId], references: [id])
-  name       String
-  completed  Boolean  @default(false)
-  reported   Boolean  @default(false)
-  sortOrder  Int      @default(0)
-  readings   RawReading[]
-  result     Result?
-  revisions  ResultRevision[]
+  id        String           @id @default(cuid())
+  jobId     String
+  job       Job              @relation(fields: [jobId], references: [id])
+  name      String
+  completed Boolean          @default(false)
+  reported  Boolean          @default(false)
+  sortOrder Int              @default(0)
+  readings  RawReading[]
+  result    Result?
+  revisions ResultRevision[]
 
   @@unique([jobId, name])
   @@index([jobId])
 }
 
 model RawReading {
-  id              String    @id @default(cuid())
-  jobAnalysisId   String
-  jobAnalysis     JobAnalysis @relation(fields: [jobAnalysisId], references: [id])
-  revision        Int       @default(1)
-  testNo          Int
-  reading         String
-  roomEquipTempC  Decimal?  @db.Decimal(8, 2)
-  weightG         Decimal?  @db.Decimal(12, 4)
-  equipmentTag    String?
-  performedById   String
-  recordedAt      DateTime  @default(now())
-  supersededAt    DateTime?
+  id             String      @id @default(cuid())
+  jobAnalysisId  String
+  jobAnalysis    JobAnalysis @relation(fields: [jobAnalysisId], references: [id])
+  revision       Int         @default(1)
+  testNo         Int
+  reading        String
+  roomEquipTempC Decimal?    @db.Decimal(8, 2)
+  weightG        Decimal?    @db.Decimal(12, 4)
+  equipmentTag   String?
+  performedById  String
+  recordedAt     DateTime    @default(now())
+  supersededAt   DateTime?
 
   @@index([jobAnalysisId, revision])
 }
@@ -359,17 +361,17 @@ model ResultRevision {
 }
 
 model EnvCondition {
-  id             String    @id @default(cuid())
-  jobId          String
-  job            Job       @relation(fields: [jobId], references: [id])
-  revision       Int       @default(1)
-  tempStartC     Decimal?  @db.Decimal(6, 2)
-  tempEndC       Decimal?  @db.Decimal(6, 2)
-  humidityStart  Decimal?  @db.Decimal(6, 2)
-  humidityEnd    Decimal?  @db.Decimal(6, 2)
-  recordedById   String
-  recordedAt     DateTime  @default(now())
-  supersededAt   DateTime?
+  id            String    @id @default(cuid())
+  jobId         String
+  job           Job       @relation(fields: [jobId], references: [id])
+  revision      Int       @default(1)
+  tempStartC    Decimal?  @db.Decimal(6, 2)
+  tempEndC      Decimal?  @db.Decimal(6, 2)
+  humidityStart Decimal?  @db.Decimal(6, 2)
+  humidityEnd   Decimal?  @db.Decimal(6, 2)
+  recordedById  String
+  recordedAt    DateTime  @default(now())
+  supersededAt  DateTime?
 
   @@index([jobId, revision])
 }
@@ -386,43 +388,43 @@ model Verification {
 }
 
 model Report {
-  id             String       @id @default(cuid())
-  jobId          String
-  job            Job          @relation(fields: [jobId], references: [id])
-  kind           ReportKind
-  status         ReportStatus
-  certificateNo  String       @unique
-  lab            LabCode
-  certYear       Int
-  yearSequence   Int
-  sampleIndex    Int
-  revision       Int          @default(1)
-  revisionOfId   String?
-  revisionOf     Report?      @relation("ReportRevision", fields: [revisionOfId], references: [id])
-  revisions      Report[]     @relation("ReportRevision")
-  storageKey     String
-  sha256         String
-  content        Json
-  issuedById     String
-  issuedAt       DateTime     @default(now())
-  supersededAt   DateTime?
+  id            String       @id @default(cuid())
+  jobId         String
+  job           Job          @relation(fields: [jobId], references: [id])
+  kind          ReportKind
+  status        ReportStatus
+  certificateNo String       @unique
+  lab           LabCode
+  certYear      Int
+  yearSequence  Int
+  sampleIndex   Int
+  revision      Int          @default(1)
+  revisionOfId  String?
+  revisionOf    Report?      @relation("ReportRevision", fields: [revisionOfId], references: [id])
+  revisions     Report[]     @relation("ReportRevision")
+  storageKey    String
+  sha256        String
+  content       Json
+  issuedById    String
+  issuedAt      DateTime     @default(now())
+  supersededAt  DateTime?
 
   @@unique([certYear, lab, yearSequence])
   @@index([jobId, status])
 }
 
 model FeeSchedule {
-  id            String    @id @default(cuid())
+  id            String          @id @default(cuid())
   code          String
   name          String
   unit          String
-  amount        Decimal   @db.Decimal(12, 2)
+  amount        Decimal         @db.Decimal(12, 2)
   currency      String
   effectiveFrom DateTime
   effectiveTo   DateTime?
   approvedById  String
   notes         String?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime        @default(now())
   lines         QuotationLine[]
 
   @@unique([code, effectiveFrom])
@@ -466,40 +468,40 @@ model QuotationLine {
 }
 
 model Payment {
-  id                String         @id @default(cuid())
-  requestId         String
-  request           ServiceRequest @relation(fields: [requestId], references: [id])
-  status            PaymentStatus  @default(UNPRICED)
-  method            PaymentMethod?
-  amount            Decimal?       @db.Decimal(12, 2)
-  currency          String?
-  clientReference   String?
+  id                   String         @id @default(cuid())
+  requestId            String
+  request              ServiceRequest @relation(fields: [requestId], references: [id])
+  status               PaymentStatus  @default(UNPRICED)
+  method               PaymentMethod?
+  amount               Decimal?       @db.Decimal(12, 2)
+  currency             String?
+  clientReference      String?
   referenceSubmittedAt DateTime?
-  confirmedAt       DateTime?
-  confirmedById     String?
-  confirmationNote  String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  confirmedAt          DateTime?
+  confirmedById        String?
+  confirmationNote     String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   @@index([requestId, status])
 }
 
 model Document {
-  id                 String          @id @default(cuid())
+  id                 String         @id @default(cuid())
   requestId          String
-  request            ServiceRequest  @relation(fields: [requestId], references: [id])
-  storageKey         String          @unique
+  request            ServiceRequest @relation(fields: [requestId], references: [id])
+  storageKey         String         @unique
   filename           String
   mimeType           String
   sizeBytes          Int
   uploadedByClientId String?
-  createdAt          DateTime        @default(now())
+  createdAt          DateTime       @default(now())
 
   @@index([requestId])
 }
 
 model Notification {
-  id           String    @id @default(cuid())
+  id           String      @id @default(cuid())
   clientUserId String?
   clientUser   ClientUser? @relation(fields: [clientUserId], references: [id])
   staffUserId  String?
@@ -507,9 +509,9 @@ model Notification {
   title        String
   body         String
   href         String?
-  dedupeKey    String?   @unique
+  dedupeKey    String?     @unique
   readAt       DateTime?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime    @default(now())
 
   @@index([clientUserId, readAt])
   @@index([staffUserId, readAt])

@@ -58,6 +58,7 @@ export const ANALYSIS_GROUPS: { label: string; names: readonly string[] }[] = [
   { label: "Rice Grain Analysis", names: RICE_GRAIN },
   { label: "Total Foreign Matter", names: ["Organic", "Inorganic"] },
   { label: "Other printed analyses", names: ANCF_001_ANALYSES.filter((name) => !GROUPED.has(name)) },
+  { label: "Wheat flour certificate", names: ["Presence of Potassium Bromate"] },
 ];
 
 /** Acceptable ranges printed on GDBS-ANCF-001 v7. They warn; they do not block a save. */
@@ -158,6 +159,46 @@ export function matchTemplateRow(kind: keyof typeof TEMPLATE_META, analysisName:
   const rows = TEMPLATE_META[kind].rows;
   const needle = normalize(analysisName);
   return rows.find((row) => needle.includes(normalize(row.analysis)) || normalize(row.analysis).includes(needle));
+}
+
+export function templateDefaults(analysisName: string) {
+  return matchTemplateRow("CERTIFICATE_OF_ANALYSIS", analysisName) ?? matchTemplateRow("TEST_REPORT", analysisName);
+}
+
+/**
+ * Simple Acceptance Decision Rule used by the Comments column of the QMF-043 and QMF-044 templates.
+ * Returns null when the requirement or result cannot be compared, so staff decide the comment themselves.
+ */
+export function assessResult(requirement: string | null | undefined, actual: string | null | undefined): "Pass" | "FAIL" | null {
+  const req = (requirement ?? "").trim().toLowerCase();
+  const act = (actual ?? "").trim().toLowerCase();
+  if (!req || !act || req === "—" || req === "-") return null;
+  if (/^(absent|not detected|nil)$/.test(req)) {
+    if (/^(absent|not detected|nd|nil|none detected)$/.test(act)) return "Pass";
+    return /^(present|detected)$/.test(act) ? "FAIL" : null;
+  }
+  if (req === "normal") return act === "normal" ? "Pass" : act === "abnormal" ? "FAIL" : null;
+  if (/^[<>≤≥]/.test(act)) return null;
+  const value = firstNumber(act);
+  if (value === null) return null;
+  const range = req.match(/(-?\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(-?\d+(?:\.\d+)?)/);
+  if (range) return value >= Number(range[1]) && value <= Number(range[2]) ? "Pass" : "FAIL";
+  const limit = firstNumber(req);
+  if (limit === null) return null;
+  if (/\bmin\b|≥|>=|not less than/.test(req)) return value >= limit ? "Pass" : "FAIL";
+  return value <= limit ? "Pass" : "FAIL";
+}
+
+/** Mean of the numeric raw-data readings, rounded to two decimals; null when none are numeric. */
+export function averageReading(readings: (string | null | undefined)[]) {
+  const values = readings.map((reading) => firstNumber(reading ?? "")).filter((value): value is number => value !== null);
+  if (values.length === 0) return null;
+  return String(Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100);
+}
+
+function firstNumber(value: string) {
+  const match = value.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
 }
 
 function normalize(value: string) {

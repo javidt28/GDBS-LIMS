@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PageHeading, Status } from "@/components/shell";
+import { formatDateTime, humanize } from "@/lib/format";
+import { Card, Facts, PageHeading, Status } from "@/components/shell";
 import { prisma } from "@/server/prisma";
 import { requireClient } from "@/server/session";
 
@@ -16,12 +17,37 @@ export default async function ClientReportPage({ params }: { params: Promise<{ i
   });
   if (!report) notFound();
   const number = `${report.certificateNo}/${String(report.sampleIndex).padStart(3, "0")}`;
+  const request = report.job.sample.request;
   return (
     <>
-      <PageHeading title={number} crumbs={[{ href: "/portal/reports", label: "Reports and certificates" }]} action={<Status value={report.status} />} />
-      <p>{report.job.sample.request?.reference ?? "—"} · {report.job.sample.description}</p>
-      <p><a className="btn btn-primary" href={`/files/reports/${report.id}`}>Download PDF</a></p>
-      <p className="help"><Link href="/portal/reports">All reports</Link></p>
+      <PageHeading
+        title={number}
+        crumbs={[{ href: "/portal/reports", label: "Reports and certificates" }]}
+        meta={humanize(report.kind)}
+        action={<Status value={report.status} />}
+      />
+      <div className="detail-grid">
+        <div className="detail-main">
+          <Card title="Document details">
+            <Facts
+              items={[
+                ["Document type", humanize(report.kind)],
+                ["Number", number],
+                ["Revision", String(report.revision)],
+                ["Issued", formatDateTime(report.issuedAt)],
+                ["Request", request && <Link href={`/portal/requests/${request.id}`}>{request.reference}</Link>],
+                ["Sample", report.job.sample.description],
+              ]}
+            />
+          </Card>
+        </div>
+        <aside className="detail-side">
+          <Card title="Download" className="card-accent">
+            <p className="card-note">The PDF is the official issued copy.</p>
+            <a className="btn btn-primary btn-block" href={`/files/reports/${report.id}`}>Download PDF</a>
+          </Card>
+        </aside>
+      </div>
     </>
   );
 }

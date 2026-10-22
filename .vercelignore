@@ -1,0 +1,10 @@
+node_modules
+.next
+.data
+data
+storage
+.env
+.env.local
+coverage
+.idea
+.DS_Store

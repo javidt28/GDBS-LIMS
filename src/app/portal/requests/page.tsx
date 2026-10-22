@@ -25,7 +25,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Request</th><th>Service</th><th>Submitted</th><th>Status</th><th>Quotation</th><th>Payment</th><th>Updated</th></tr>
+              <tr><th>Request</th><th>Service</th><th>Submitted</th><th>Status</th><th>Invoice</th><th>Payment</th><th>Updated</th></tr>
             </thead>
             <tbody>
               {requests.map((request) => (
